@@ -53,12 +53,16 @@ def retrieve_similar(
 
 def make_retriever(
     chroma_dir: str | Path, embedder: Embedder, k: int = 8
-) -> Callable[[str, dict | None], list[RetrievedChunk]]:
-    """Retriever de production pour l'agent : (query, where) -> passages. Les erreurs remontent à l'appelant."""
+) -> Callable[..., list[RetrievedChunk]]:
+    """Retriever de production pour l'agent : (query, where, k) -> passages. Les erreurs remontent à l'appelant.
+
+    k est le nombre de passages par défaut ; l'agent le fixe à chaque appel.
+    """
     if k < 1:
         raise ValueError("k doit être >= 1")
+    default_k = k
 
-    def retriever(query: str, where: dict | None) -> list[RetrievedChunk]:
+    def retriever(query: str, where: dict | None, k: int = default_k) -> list[RetrievedChunk]:
         return retrieve_similar(query, k=k, where=where, embedder=embedder, chroma_dir=chroma_dir)
 
     return retriever

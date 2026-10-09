@@ -4,8 +4,8 @@ Le verdict n'est écrit que par le nœud oracle ; create_ticket le lit dans stat
 """
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from langgraph.types import interrupt
 from pydantic import ValidationError
@@ -15,6 +15,7 @@ from shopfloor.agent.guard import GuardResult, check_proposal
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.erp.client import ErpClient, ErpConflictError, ErpError, ErpUnavailableError
 from shopfloor.erp.schemas import TicketCreate
+from shopfloor.errors import OLLAMA_INDISPONIBLE, RAG_INDISPONIBLE, OllamaUnavailableError
 from shopfloor.llm.client import LLMClient, LLMError
 from shopfloor.llm.prompts import build_proposal_prompt, build_retry_user, proposal_json_schema
 from shopfloor.models import ActionProposal, NCRecord, OracleResult, ToleranceTable, Verdict
@@ -22,11 +23,14 @@ from shopfloor.nc import NCParseError, parse_nc_file
 from shopfloor.oracle.conformity import check_conformity
 from shopfloor.rag.retriever import RetrievedChunk
 
-Retriever = Callable[[str, dict | None], list[RetrievedChunk]]
 
+class Retriever(Protocol):
+    def __call__(self, query: str, where: dict | None, k: int) -> list[RetrievedChunk]: ...
+
+
+RETRIEVE_K = 20  # passages demandés avant le regroupement par doc_id
 SIMILAR_DOCS = 3
 MAX_LLM_CALLS = 2  # D5 : un appel, une relance au maximum
-RAG_INDISPONIBLE = "Index RAG indisponible : lancez python -m shopfloor.cli ingest"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,15 +64,20 @@ def build_query(nc: NCRecord, oracle_result: OracleResult) -> str:
 def retrieve_similar(state: AgentState, deps: Deps) -> dict:
     where = {"domaine": {"$in": [state.nc.procede, "qualite"]}}
     try:
-        chunks = deps.retriever(build_query(state.nc, state.oracle), where)
-    except Exception:  # index absent, Chroma ou embedder indisponible : on arrête proprement
+        chunks = deps.retriever(build_query(state.nc, state.oracle), where, RETRIEVE_K)
+    except OllamaUnavailableError:  # embedder injoignable
+        return {"error": OLLAMA_INDISPONIBLE}
+    except Exception:  # index absent ou Chroma indisponible : on arrête proprement
         return {"error": RAG_INDISPONIBLE}
     best: dict[str, RetrievedChunk] = {}
     for c in chunks:
         if c.doc_id not in best or c.score > best[c.doc_id].score:
             best[c.doc_id] = c
     top = sorted(best.values(), key=lambda c: c.score, reverse=True)[:SIMILAR_DOCS]
-    return {"similar": top}
+    # Tous les passages retrouvés des documents retenus, du plus proche au plus éloigné : contexte du prompt.
+    rang = {c.doc_id: i for i, c in enumerate(top)}
+    passages = sorted((c for c in chunks if c.doc_id in rang), key=lambda c: (rang[c.doc_id], -c.score))
+    return {"similar": top, "passages": passages}
 
 
 def _describe(e: ValueError) -> str:
@@ -99,7 +108,7 @@ def propose_action(state: AgentState, deps: Deps) -> dict:
     if deps.llm is None:
         return _repli(state.oracle, 0, ("aucun LLM configuré : proposition déterministe",))
 
-    system, user = build_proposal_prompt(state.nc, state.oracle, state.similar)
+    system, user = build_proposal_prompt(state.nc, state.oracle, state.passages or state.similar)
     schema = proposal_json_schema()
     prompt = user
     motifs: list[str] = []
@@ -109,7 +118,7 @@ def propose_action(state: AgentState, deps: Deps) -> dict:
         try:
             raw = deps.llm.complete_json(system, prompt, schema)
         except LLMError as e:
-            motifs.append(f"appel LLM en échec : {e}")
+            motifs.append(str(e) if isinstance(e, OllamaUnavailableError) else f"appel LLM en échec : {e}")
             break
         try:
             proposal = parse_proposal(raw)

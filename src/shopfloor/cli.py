@@ -12,10 +12,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from chromadb.errors import NotFoundError
+
 from shopfloor.agent.graph import Deps, build_graph, get_state, resume, start
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.config import Settings
 from shopfloor.erp.client import ErpClient
+from shopfloor.errors import RAG_INDISPONIBLE, OllamaUnavailableError
 from shopfloor.llm.ollama_client import OllamaLLM
 from shopfloor.oracle.loader import load_tolerances
 from shopfloor.rag.embeddings import OllamaEmbedder
@@ -169,7 +172,11 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
     settings = Settings()
     embedder = embedder or OllamaEmbedder(settings)
     if args.command == "ingest":
-        n = ingest(embedder)
+        try:
+            n = ingest(embedder)
+        except OllamaUnavailableError as e:
+            print(f"ERREUR : {e}")
+            return 1
         print(f"{n} chunks indexés dans la collection shopfloor_docs")
         return 0
 
@@ -194,7 +201,14 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
             return run_process(args.fiche, deps, decide)
 
     where = {"domaine": args.domaine} if args.domaine else None
-    results = retrieve_similar(args.query, k=args.k, where=where, embedder=embedder)
+    try:
+        results = retrieve_similar(args.query, k=args.k, where=where, embedder=embedder)
+    except OllamaUnavailableError as e:
+        print(f"ERREUR : {e}")
+        return 1
+    except NotFoundError:
+        print(f"ERREUR : {RAG_INDISPONIBLE}")
+        return 1
     if not results:
         print("aucun résultat")
     for i, r in enumerate(results, 1):

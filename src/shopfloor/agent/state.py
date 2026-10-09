@@ -40,7 +40,8 @@ class AgentState(BaseModel):
     nc_path: str
     nc: NCRecord | None = None
     oracle: OracleResult | None = None  # écrit uniquement par le nœud oracle
-    similar: list[RetrievedChunk] = []
+    similar: list[RetrievedChunk] = []  # meilleur passage de chaque document retenu
+    passages: list[RetrievedChunk] = []  # tous les passages retrouvés de ces documents (prompt)
     proposal: ActionProposal | None = None
     guard: GuardResult | None = None
     llm_calls: int = 0

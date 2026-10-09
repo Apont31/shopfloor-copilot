@@ -4,6 +4,8 @@ Lancé à la main : pytest -m llm -v -rA (le détail de chaque essai est affich�
 Aucune assertion sur la formulation du LLM : seuls le verdict, le schéma et les sources sont vérifiés.
 """
 
+import re
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,7 @@ from shopfloor.nc import parse_nc_file
 from shopfloor.oracle.conformity import check_conformity
 from shopfloor.oracle.loader import load_tolerances
 from shopfloor.rag.embeddings import OllamaEmbedder
-from shopfloor.rag.ingest import ingest
+from shopfloor.rag.ingest import chunk_document, ingest
 from shopfloor.rag.retriever import make_retriever
 
 pytestmark = pytest.mark.llm
@@ -74,8 +76,8 @@ def test_a_ollama_llm_json_valide(retriever):
     oracle = check_conformity(nc, TOLERANCES)
     state = AgentState(nc_path=str(NC_101), nc=nc, oracle=oracle)
     deps = Deps(tolerances=TOLERANCES, retriever=retriever, erp=None)
-    similar = nodes.retrieve_similar(state, deps)["similar"]
-    system, user = build_proposal_prompt(nc, oracle, similar)
+    passages = nodes.retrieve_similar(state, deps)["passages"]
+    system, user = build_proposal_prompt(nc, oracle, passages)
 
     llm = ChronoLLM(OllamaLLM())
     raw = llm.complete_json(system, user, proposal_json_schema())
@@ -130,3 +132,35 @@ def test_d_deux_executions(retriever, tmp_path):
     assert t1["verdict"] == t2["verdict"] == "NON_CONFORME"
     assert s1.oracle == s2.oracle
     print(f"\n[d] texte de proposition identique : {s1.proposal == s2.proposal}")
+
+
+# e. Étape 7b, informatif : la proposition reprend-elle la cause ou l'action de NC-2025-014 ?
+_MOTS_VIDES = frozenset(
+    "avant apres avait etait cette comme dans pendant entre aucune sur les des une sans pour avec "
+    "suivants panneau".split()
+)
+
+
+def _mots(text: str) -> set[str]:
+    text = "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
+    return {m for m in re.findall(r"\w+", text) if len(m) >= 5 and m not in _MOTS_VIDES}
+
+
+def test_e_proposition_nc_101_et_nc_2025_014(retriever, erp_http):
+    state, durations = run_graph(NC_101, retriever, erp_http)
+    report("e", state, durations)
+    doc_ids = [c.doc_id for c in state.similar]
+    assert len(set(doc_ids)) == 3, doc_ids  # critère de fin de l'étape 7b (retrieval, pas formulation)
+
+    sections = {c.metadata["section"]: c.text for c in chunk_document(ROOT / "data" / "docs" / "NC-2025-014.md")}
+    p = state.proposal
+    for nom, section, champ in (
+        ("la cause", "Cause racine", p.cause_probable),
+        ("l'action", "Action corrective", p.action_corrective),
+    ):
+        communs = sorted(_mots(sections[section]) & _mots(champ))
+        print(f"[e] reprend {nom} de NC-2025-014 : {'oui' if len(communs) >= 3 else 'non'} "
+              f"(mots communs : {', '.join(communs) or 'aucun'})")
+    print(f"[e] NC-2025-014 citée en source : {'NC-2025-014' in p.sources}")
+    print(f"[e] cause_probable : {p.cause_probable}")
+    print(f"[e] action_corrective : {p.action_corrective}")

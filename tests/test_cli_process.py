@@ -1,5 +1,6 @@
 """Sous-commande process : run_process avec FakeLLM, FakeEmbedder (index dans tmp_path) et ERP TestClient."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,11 +10,13 @@ from fastapi.testclient import TestClient
 from shopfloor import cli
 from shopfloor.agent.graph import Deps
 from shopfloor.agent.state import HumanDecision
+from shopfloor.config import Settings
 from shopfloor.erp.api import create_app
 from shopfloor.erp.client import ErpClient
 from shopfloor.llm.client import LLMError
+from shopfloor.llm.ollama_client import OllamaLLM
 from shopfloor.oracle.loader import load_tolerances
-from shopfloor.rag.embeddings import FakeEmbedder
+from shopfloor.rag.embeddings import FakeEmbedder, OllamaEmbedder
 from shopfloor.rag.ingest import ingest
 from shopfloor.rag.retriever import make_retriever
 
@@ -176,3 +179,46 @@ def test_cli_decision_exige_valide_par(capsys):
     with pytest.raises(SystemExit):
         cli.main(["process", str(NC_101), "--decision", "approve"], embedder=FakeEmbedder())
     assert "--valide-par" in capsys.readouterr().err
+
+
+# --- Étape 7b : messages d'erreur ---------------------------------------------------------------------
+
+OLLAMA_KO = "ERREUR : Ollama indisponible : lancez l'application Ollama"
+
+
+def ollama_absent() -> OllamaEmbedder:
+    return OllamaEmbedder(Settings(ollama_host="http://127.0.0.1:9"))
+
+
+def test_process_embedder_injoignable_code_1(chroma_dir, erp_http, capsys):
+    erp = ErpClient("http://testserver", http_client=erp_http)
+    d = replace(deps(chroma_dir, erp, FakeLLM()), retriever=make_retriever(chroma_dir, ollama_absent()))
+    assert cli.run_process(NC_101, d, lambda p: APPROVE) == 1
+    assert OLLAMA_KO in capsys.readouterr().out
+    assert erp_http.get("/tickets").json() == []
+
+
+def test_process_llm_injoignable_alerte(chroma_dir, erp_http, capsys):
+    erp = ErpClient("http://testserver", http_client=erp_http)
+    llm = OllamaLLM(Settings(ollama_host="http://127.0.0.1:9"), timeout=2)
+    assert cli.run_process(NC_101, deps(chroma_dir, erp, llm), lambda p: APPROVE) == 0
+    out = capsys.readouterr().out
+    assert "ALERTE garde-fou :\n  - Ollama indisponible : lancez l'application Ollama" in out
+
+
+def test_cli_ingest_ollama_injoignable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
+    assert cli.main(["ingest"], embedder=ollama_absent()) == 1
+    assert OLLAMA_KO in capsys.readouterr().out
+
+
+def test_cli_search_ollama_injoignable(chroma_dir, monkeypatch, capsys):
+    monkeypatch.setenv("CHROMA_DIR", str(chroma_dir))
+    assert cli.main(["search", "porosité"], embedder=ollama_absent()) == 1
+    assert OLLAMA_KO in capsys.readouterr().out
+
+
+def test_cli_search_collection_absente(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "vide"))
+    assert cli.main(["search", "porosité"], embedder=FakeEmbedder()) == 1
+    assert "ERREUR : Index RAG indisponible : lancez python -m shopfloor.cli ingest" in capsys.readouterr().out

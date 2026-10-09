@@ -174,3 +174,29 @@ def test_default_proposal_non_conforme_passe_le_garde_fou():
     p = default_proposal(NON_CONFORME)
     assert p.sources == ["PROC-QUA-01"]
     assert check_proposal(p, NON_CONFORME, p.sources).ok
+
+
+# --- Étape 7b : la fenêtre de négation s'arrête à la ponctuation -----------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Pas d'écart : conforme.",
+    "Pas d'écart, conforme.",
+    "Non. Conforme.",
+    "Jamais d'alerte ; conformes.",
+    "Pas de doute ! Conforme ?",
+    "Pas vu ? conforme",
+])
+def test_negation_separee_par_une_ponctuation_rejetee(text):
+    assert affirme_conformite(text)
+    assert not check_proposal(proposal(resume=text), NON_CONFORME, RETRIEVED).ok
+
+
+@pytest.mark.parametrize("text", [
+    "n'est pas conforme",
+    "n'est toujours pas conforme",
+    "Le panneau n'est pas conforme, il est isolé.",
+    "Écart relevé : pièce non conforme.",
+])
+def test_negation_sans_ponctuation_toujours_acceptee(text):
+    assert not affirme_conformite(text)
+    assert check_proposal(proposal(cause_probable=text), NON_CONFORME, RETRIEVED).ok

@@ -61,5 +61,17 @@ CHUNKS = (
 )
 
 
-def fake_retriever(query: str, where: dict | None) -> list[RetrievedChunk]:
-    return list(CHUNKS)
+def fake_retriever(query: str, where: dict | None, k: int) -> list[RetrievedChunk]:
+    return list(CHUNKS[:k])
+
+
+class FakeRetriever:
+    """Renvoie les k premiers passages scriptés, comme Chroma ; mémorise chaque appel (query, where, k)."""
+
+    def __init__(self, chunks=CHUNKS):
+        self.chunks = list(chunks)
+        self.calls: list[tuple[str, dict | None, int]] = []
+
+    def __call__(self, query: str, where: dict | None, k: int) -> list[RetrievedChunk]:
+        self.calls.append((query, where, k))
+        return self.chunks[:k]

@@ -8,6 +8,7 @@ from typing import Protocol
 import ollama
 
 from shopfloor.config import Settings
+from shopfloor.errors import OLLAMA_INJOIGNABLE, OllamaUnavailableError
 
 
 class Embedder(Protocol):
@@ -28,7 +29,11 @@ class OllamaEmbedder:
         self.client = ollama.Client(host=settings.ollama_host)
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        return [list(e) for e in self.client.embed(model=self.model, input=texts)["embeddings"]]
+        try:
+            resp = self.client.embed(model=self.model, input=texts)
+        except OLLAMA_INJOIGNABLE as e:
+            raise OllamaUnavailableError() from e
+        return [list(e) for e in resp["embeddings"]]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return self._embed([self.DOC_PREFIX + t for t in texts])

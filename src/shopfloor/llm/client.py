@@ -2,9 +2,15 @@
 
 from typing import Protocol
 
+from shopfloor.errors import OllamaUnavailableError
+
 
 class LLMError(Exception):
     """Échec d'appel au LLM (serveur injoignable, timeout…). Le nœud bascule alors sur le repli."""
+
+
+class LLMUnavailableError(LLMError, OllamaUnavailableError):
+    """Serveur du LLM injoignable : message OLLAMA_INDISPONIBLE."""
 
 
 class LLMClient(Protocol):

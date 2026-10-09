@@ -3,7 +3,8 @@
 import ollama
 
 from shopfloor.config import Settings
-from shopfloor.llm.client import LLMError
+from shopfloor.errors import OLLAMA_INJOIGNABLE
+from shopfloor.llm.client import LLMError, LLMUnavailableError
 
 TIMEOUT_S = 120.0
 # Réglages déterministes : même prompt -> même sortie autant que le modèle le permet.
@@ -27,6 +28,8 @@ class OllamaLLM:
                 options=OPTIONS,
             )
             content = resp["message"]["content"]
+        except OLLAMA_INJOIGNABLE as e:
+            raise LLMUnavailableError() from e
         except Exception as e:  # connexion, timeout, modèle absent, réponse malformée…
             raise LLMError(f"{type(e).__name__}: {e}") from e
         if not isinstance(content, str) or not content.strip():

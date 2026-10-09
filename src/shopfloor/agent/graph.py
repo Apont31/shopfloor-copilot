@@ -2,7 +2,7 @@
 
 parse_nc -> oracle -> [NON_CONFORME] retrieve_similar -> propose_action -> human_gate -> create_ticket
                    -> [CONFORME, INDETERMINE] propose_default -> human_gate
-Une fiche illisible s'arrête après parse_nc ; un index RAG indisponible après retrieve_similar ;
+Une fiche illisible s'arrête après parse_nc ; un index RAG ou Ollama indisponible après retrieve_similar ;
 un rejet humain s'arrête après human_gate.
 """
 
@@ -25,7 +25,7 @@ __all__ = ["Deps", "build_graph", "thread_config", "initial_state", "start", "re
 WRITES: dict[str, frozenset[str]] = {
     "parse_nc": frozenset({"nc", "error"}),
     "oracle": frozenset({"oracle"}),
-    "retrieve_similar": frozenset({"similar", "error"}),
+    "retrieve_similar": frozenset({"similar", "passages", "error"}),
     "propose_action": frozenset({"proposal", "guard", "llm_calls"}),
     "propose_default": frozenset({"proposal"}),
     "human_gate": frozenset({"human"}),

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from fakes import CHUNKS, FakeLLM, fake_retriever, proposal_json
+from fakes import CHUNKS, FakeLLM, FakeRetriever, fake_retriever, proposal_json
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -13,14 +13,18 @@ from shopfloor.agent import nodes
 from shopfloor.agent.fallback import default_proposal
 from shopfloor.agent.graph import Deps, build_graph, get_state, resume, start
 from shopfloor.agent.state import AgentState, HumanDecision
+from shopfloor.config import Settings
 from shopfloor.erp.api import create_app
 from shopfloor.erp.client import ErpClient
+from shopfloor.errors import OLLAMA_INDISPONIBLE, RAG_INDISPONIBLE
 from shopfloor.llm.client import LLMError
+from shopfloor.llm.ollama_client import OllamaLLM
 from shopfloor.models import Verdict
 from shopfloor.nc import parse_nc_file
 from shopfloor.oracle.conformity import check_conformity
 from shopfloor.oracle.loader import load_tolerances
-from shopfloor.rag.embeddings import FakeEmbedder
+from shopfloor.rag.embeddings import FakeEmbedder, OllamaEmbedder
+from shopfloor.rag.ingest import ingest
 from shopfloor.rag.retriever import make_retriever
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -318,7 +322,7 @@ def test_llm_ne_peut_pas_fixer_origine(erp):
 def test_retrieve_similar_requete_filtre_et_regroupement(erp):
     seen = []
 
-    def retriever(query, where):
+    def retriever(query, where, k):
         seen.append((query, where))
         extra = CHUNKS[0].model_copy(update={"doc_id": "GAMME-CP210", "score": 0.30})
         return [*CHUNKS, extra]
@@ -383,3 +387,81 @@ def test_checkpoint_sans_type_non_autorise(erp, caplog):
     graph = make_graph(erp, FakeLLM(proposal_json()))
     run(graph, NC_101, APPROVE)
     assert not [r for r in caplog.records if "msgpack" in r.getMessage()]
+
+
+# --- Étape 7b : retrieval k=20 et messages d'erreur -------------------------------------------------
+
+def _passage(doc_id: str, type_: str, section: str, score: float):
+    return CHUNKS[0].model_copy(update={"doc_id": doc_id, "type": type_, "section": section, "score": score})
+
+
+# 10 passages de NC-2025-014 devant les autres documents : avec k=8, un seul document serait retenu.
+PASSAGES_NC_EN_TETE = (
+    *(_passage("NC-2025-014", "nc_historique", f"Section {i}", 0.90 - i / 100) for i in range(10)),
+    _passage("PROC-COMP-01", "procedure", "Mise sous vide", 0.70),
+    _passage("PROC-COMP-01", "procedure", "Cuisson", 0.68),
+    _passage("GAMME-CP210", "gamme", "Points de vigilance", 0.66),
+    _passage("PROC-QUA-01", "transverse", "Décisions possibles", 0.60),
+)
+
+
+def test_retrieve_similar_demande_20_passages(erp):
+    retriever = FakeRetriever()
+    run(make_graph(erp, FakeLLM(proposal_json()), retriever), NC_101)
+    [(_, _, k)] = retriever.calls
+    assert k == nodes.RETRIEVE_K == 20
+
+
+def test_retrieve_similar_3_documents_distincts(erp):
+    retriever = FakeRetriever(PASSAGES_NC_EN_TETE)
+    state = run(make_graph(erp, FakeLLM(proposal_json()), retriever), NC_101)
+    assert [c.doc_id for c in state.similar] == ["NC-2025-014", "PROC-COMP-01", "GAMME-CP210"]
+    assert len({c.doc_id for c in state.similar}) == 3
+    # Contre-épreuve : les 8 premiers passages seuls ne donnent qu'un document.
+    assert {c.doc_id for c in PASSAGES_NC_EN_TETE[:8]} == {"NC-2025-014"}
+
+
+def test_retrieve_similar_moins_de_3_documents_disponibles(erp):
+    retriever = FakeRetriever(PASSAGES_NC_EN_TETE[:11])
+    state = run(make_graph(erp, FakeLLM(proposal_json()), retriever), NC_101)
+    assert [c.doc_id for c in state.similar] == ["NC-2025-014", "PROC-COMP-01"]
+
+
+def test_passages_des_documents_retenus_transmis_au_prompt(erp):
+    llm = FakeLLM(proposal_json())
+    state = run(make_graph(erp, llm, FakeRetriever(PASSAGES_NC_EN_TETE)), NC_101)
+    # Tous les passages des 3 documents retenus, groupés par document ; PROC-QUA-01 (4e) exclu.
+    assert [c.doc_id for c in state.passages] == ["NC-2025-014"] * 10 + ["PROC-COMP-01"] * 2 + ["GAMME-CP210"]
+    [(_, user, _)] = llm.calls
+    assert "doc_id citables : NC-2025-014, PROC-COMP-01, GAMME-CP210" in user
+    assert "Passage « Mise sous vide » :" in user and "Passage « Cuisson » :" in user
+    assert 'doc_id="PROC-QUA-01"' not in user
+
+
+@pytest.fixture(scope="module")
+def chroma_dir(tmp_path_factory):
+    path = tmp_path_factory.mktemp("chroma")
+    ingest(FakeEmbedder(), ROOT / "data" / "docs", path)
+    return path
+
+
+def test_embedder_injoignable_message_ollama(erp, chroma_dir):
+    llm = FakeLLM()
+    embedder = OllamaEmbedder(Settings(ollama_host="http://127.0.0.1:9"))
+    state = run(make_graph(erp, llm, make_retriever(chroma_dir, embedder)), NC_101)
+    assert state.error == OLLAMA_INDISPONIBLE == "Ollama indisponible : lancez l'application Ollama"
+    assert state.oracle.verdict == Verdict.NON_CONFORME
+    assert state.proposal is None and llm.n_calls == 0
+    assert erp.tickets() == []
+
+
+def test_llm_injoignable_message_ollama(erp):
+    llm = OllamaLLM(Settings(ollama_host="http://127.0.0.1:9"), timeout=2)
+    state = run(make_graph(erp, llm), NC_101)
+    assert state.proposal.origine == "deterministe"
+    assert state.guard.motifs == ("Ollama indisponible : lancez l'application Ollama",)
+
+
+def test_collection_chroma_absente_message_ingest(erp, tmp_path):
+    state = run(make_graph(erp, FakeLLM(), make_retriever(tmp_path / "sans_collection", FakeEmbedder())), NC_101)
+    assert state.error == RAG_INDISPONIBLE == "Index RAG indisponible : lancez python -m shopfloor.cli ingest"

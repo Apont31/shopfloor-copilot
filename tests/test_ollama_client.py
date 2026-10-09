@@ -5,8 +5,10 @@ import ollama
 import pytest
 
 from shopfloor.config import Settings
-from shopfloor.llm.client import LLMError
+from shopfloor.errors import OLLAMA_INDISPONIBLE, OllamaUnavailableError
+from shopfloor.llm.client import LLMError, LLMUnavailableError
 from shopfloor.llm.ollama_client import OllamaLLM
+from shopfloor.rag.embeddings import OllamaEmbedder
 
 SCHEMA = {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}
 
@@ -52,7 +54,6 @@ def test_timeout_par_defaut_120_s():
 
 
 @pytest.mark.parametrize("error", [
-    ConnectionError("Failed to connect to Ollama"),
     httpx.ReadTimeout("timed out"),
     ollama.ResponseError("model not found", 404),
 ])
@@ -83,3 +84,36 @@ def test_hote_injoignable_llm_error():
     client = OllamaLLM(Settings(ollama_host="http://127.0.0.1:9"), timeout=2)
     with pytest.raises(LLMError):
         client.complete_json("s", "u", SCHEMA)
+
+
+# --- Étape 7b : Ollama injoignable -> message d'action unique ---------------------------------------
+
+@pytest.mark.parametrize("error", [
+    ConnectionError("Failed to connect to Ollama"),
+    httpx.ConnectError("connexion refusée"),
+    httpx.ConnectTimeout("délai de connexion"),
+])
+def test_llm_injoignable_message_ollama_indisponible(error):
+    client, _ = llm(error)
+    with pytest.raises(LLMUnavailableError, match="^Ollama indisponible : lancez l'application Ollama$"):
+        client.complete_json("s", "u", SCHEMA)
+
+
+def test_llm_injoignable_reste_une_llm_error():
+    """Le nœud propose_action continue de basculer sur le repli (LLMError)."""
+    assert issubclass(LLMUnavailableError, LLMError)
+    assert issubclass(LLMUnavailableError, OllamaUnavailableError)
+
+
+def test_hote_injoignable_message_ollama_indisponible():
+    client = OllamaLLM(Settings(ollama_host="http://127.0.0.1:9"), timeout=2)
+    with pytest.raises(LLMUnavailableError) as exc:
+        client.complete_json("s", "u", SCHEMA)
+    assert str(exc.value) == OLLAMA_INDISPONIBLE
+
+
+def test_embedder_hote_injoignable_message_ollama_indisponible():
+    embedder = OllamaEmbedder(Settings(ollama_host="http://127.0.0.1:9"))
+    with pytest.raises(OllamaUnavailableError) as exc:
+        embedder.embed_query("porosité")
+    assert str(exc.value) == OLLAMA_INDISPONIBLE == "Ollama indisponible : lancez l'application Ollama"
