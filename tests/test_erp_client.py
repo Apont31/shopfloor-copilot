@@ -75,3 +75,17 @@ def test_verdict_literal_aligne_sur_enum():
     """Seul test autorisé à importer shopfloor.models : l'ERP ne dépend pas du cœur."""
     literal = TicketCreate.model_fields["verdict"].annotation
     assert sorted(get_args(literal)) == sorted(v.value for v in Verdict)
+
+
+def test_close_et_context_manager():
+    with ErpClient("http://127.0.0.1:9", timeout=0.5) as erp:
+        assert not erp._http.is_closed
+    assert erp._http.is_closed
+
+
+def test_close_ne_ferme_pas_un_client_injecte(tmp_path):
+    http = TestClient(create_app(tmp_path / "erp.db"))
+    with ErpClient("http://testserver", http_client=http) as erp:
+        erp.create_ticket(payload())
+    assert not http.is_closed
+    assert http.get("/health").status_code == 200

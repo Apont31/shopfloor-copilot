@@ -35,6 +35,18 @@ class ErpClient:
         self.timeout = timeout
         # Un client injecté (TestClient, client partagé) garde son propre timeout.
         self._http = http_client if http_client is not None else httpx.Client(timeout=timeout)
+        self._owns_http = http_client is None
+
+    def close(self) -> None:
+        """Ferme le client HTTP créé ici. Un client injecté reste à la charge de son propriétaire."""
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> "ErpClient":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:

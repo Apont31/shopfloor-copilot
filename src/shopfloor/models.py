@@ -3,9 +3,9 @@
 import datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
 
 def to_decimal(v):
@@ -117,3 +117,19 @@ class OracleResult(BaseModel):
     verdict: Verdict
     details: tuple[MeasureResult, ...]
     rules_hash: str
+
+
+class ActionProposal(BaseModel):
+    """Proposition d'action corrective (décision D4 : aucun champ verdict).
+
+    extra="forbid" : une sortie LLM qui ajoute un champ (ex. verdict) échoue à la validation.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    resume: str
+    cause_probable: str
+    action_corrective: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    decision_suggeree: Literal["retouche", "rebut", "derogation", "escalade"]
+    sources: list[str]
+    origine: Literal["llm", "deterministe"]
