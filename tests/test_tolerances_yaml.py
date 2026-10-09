@@ -190,3 +190,22 @@ def test_get_par_part_ref_et_caracteristique():
     assert table.get("CP-210", "rugosite") is None
     assert table.get("XX-999", "porosite") is None
     assert table.get("SE-450", "porosite") is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"id": "XX-1.autre"}, id="caracteristique_differente"),
+        pytest.param({"id": "XX-2.cote"}, id="part_ref_different"),
+        pytest.param({"id": "XX-1_cote"}, id="separateur"),
+        pytest.param({"id": "xx-1.cote"}, id="casse"),
+    ],
+)
+def test_id_incoherent_refuse(tmp_path, overrides):
+    with pytest.raises(ToleranceError, match="id incohérent"):
+        load_tolerances(write_yaml(tmp_path, [spec(**overrides)]))
+
+
+def test_id_coherent_accepte(tmp_path):
+    table = load_tolerances(write_yaml(tmp_path, [spec()]))
+    assert table.specs[0].id == "XX-1.cote"

@@ -45,6 +45,11 @@ def load_tolerances(path: str | Path) -> ToleranceTable:
         if key in seen_keys:
             raise ToleranceError(f"{s.id} : couple (part_ref, caracteristique) en double : {key}")
         seen_keys.add(key)
+
+    for s in table.specs:
+        expected_id = f"{s.part_ref}.{s.caracteristique}"
+        if s.id != expected_id:
+            raise ToleranceError(f"{s.id} : id incohérent, attendu {expected_id!r}")
         if s.min is None and s.max is None:
             raise ToleranceError(f"{s.id} : au moins une borne (min ou max) est requise")
         if s.min is not None and s.max is not None and s.min > s.max:

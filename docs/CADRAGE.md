@@ -4,7 +4,7 @@ Décisions validées à l'étape 1. Toute évolution passe par le chef de projet
 
 **D1 — L'oracle seul décide de la conformité.**
 Code pur, sans LLM, réseau ni horloge. Tolérances lues uniquement dans `config/tolerances.yaml`, bornes incluses, comparaisons en `Decimal`.
-Fonction : `check_conformity` (nom imposé par le skill oracle-guard ; la signature exacte reste à fixer, le skill ne la précise pas).
+Fonction : `check_conformity(nc: NCRecord, tolerances: ToleranceTable) -> OracleResult` (signature fixée à l'étape 3, conforme au skill oracle-guard).
 Verdicts : `CONFORME` / `NON_CONFORME` / `INDETERMINE`. Le verdict structuré porte : statut, mesure, tolérance, écart.
 
 **D2 — `parse_nc` est déterministe.**

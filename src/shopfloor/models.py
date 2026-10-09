@@ -56,6 +56,9 @@ class ToleranceTable(BaseModel):
                 return s
         return None
 
+    def has_part_ref(self, part_ref: str) -> bool:
+        return any(s.part_ref == part_ref for s in self.specs)
+
 
 class Verdict(str, Enum):
     CONFORME = "CONFORME"

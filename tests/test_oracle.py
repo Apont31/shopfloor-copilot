@@ -115,7 +115,7 @@ def test_specs_unilaterales_attendues():
 @pytest.mark.parametrize(
     "nc, motif",
     [
-        pytest.param(make_nc([("porosite", 1.0, "pct")], part_ref="XX-999"), "caractéristique inconnue", id="part_ref_inconnu"),
+        pytest.param(make_nc([("porosite", 1.0, "pct")], part_ref="XX-999"), "part_ref inconnu", id="part_ref_inconnu"),
         pytest.param(make_nc([("rugosite", 1.0, "um")]), "caractéristique inconnue", id="caracteristique_inconnue"),
         pytest.param(make_nc([("epaisseur", 3.2, "um")]), "unité différente", id="unite_differente"),
         pytest.param(make_nc([("porosite", 1.0, "pct")], procede="peinture"), "procédé différent", id="procede_different"),
@@ -133,6 +133,14 @@ def test_indetermine(nc, motif):
 def test_unite_differente_meme_hors_bornes_reste_indetermine():
     # 9999 serait NON_CONFORME en mm : l'unité incohérente prime, l'oracle ne devine pas.
     assert check_conformity(make_nc([("epaisseur", 9999, "um")]), TABLE).verdict == I
+
+
+def test_motif_part_ref_inconnu_vs_caracteristique_inconnue():
+    inconnu = check_conformity(make_nc([("porosite", 1.0, "pct")], part_ref="XX-999"), TABLE).details[0]
+    assert inconnu.motif == "part_ref inconnu : aucune tolérance pour XX-999"
+    connu = check_conformity(make_nc([("rugosite", 1.0, "um")]), TABLE).details[0]
+    assert connu.motif == "caractéristique inconnue : aucune tolérance pour CP-210 / rugosite"
+    assert inconnu.statut == connu.statut == I
 
 
 def test_spec_absente_sans_spec_id():
@@ -213,23 +221,48 @@ def test_description_ignoree_par_l_oracle():
 # --- Garde d'imports (pureté) -------------------------------------------------------
 
 CONFORMITY = ROOT / "src" / "shopfloor" / "oracle" / "conformity.py"
-FORBIDDEN = {
+MODELS = ROOT / "src" / "shopfloor" / "models.py"
+GUARDED = sorted((ROOT / "src" / "shopfloor" / "oracle").glob("*.py")) + [MODELS]
+# Interdit partout : LLM, réseau, base vectorielle.
+FORBIDDEN_LLM_NET = {
     "langchain", "langchain_core", "langchain_ollama", "langgraph", "ollama", "httpx", "chromadb",
-    "requests", "urllib", "socket", "os", "pathlib", "io", "yaml", "time", "random",
+    "requests", "urllib", "socket",
 }
+# Interdit en plus dans le code pur (conformity.py, models.py) : I/O, horloge, hasard.
+# loader.py lit le YAML : il garde pathlib et yaml.
+FORBIDDEN_IO = {"os", "pathlib", "io", "yaml", "time", "random"}
+PURE = {CONFORMITY, MODELS}
 
 
-def test_garde_imports_conformity():
-    tree = ast.parse(CONFORMITY.read_text(encoding="utf-8"))
+def imported_modules(path: Path) -> set[str]:
     imported = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             imported |= {a.name.split(".")[0] for a in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add((node.module or "").split(".")[0])
-    assert imported, "analyse AST vide"
-    assert not imported & FORBIDDEN, imported & FORBIDDEN
+    return imported
+
+
+def test_garde_couvre_oracle_et_models():
+    names = {p.name for p in GUARDED}
+    assert {"conformity.py", "loader.py", "__init__.py", "models.py"} <= names
+
+
+@pytest.mark.parametrize("path", GUARDED, ids=lambda p: f"{p.parent.name}/{p.name}")
+def test_garde_imports(path):
+    imported = imported_modules(path)
+    forbidden = FORBIDDEN_LLM_NET | (FORBIDDEN_IO if path in PURE else set())
+    if path in PURE:
+        assert imported, "analyse AST vide"
+    assert not imported & forbidden, imported & forbidden
     assert not {m for m in imported if m.startswith(("langchain", "langgraph"))}
+
+
+def test_garde_imports_detecte_un_import_interdit(tmp_path):
+    p = tmp_path / "fake.py"
+    p.write_text("import os\nfrom langchain_core.messages import AIMessage\n", encoding="utf-8")
+    assert {"os", "langchain_core"} <= imported_modules(p)
 
 
 def test_conformity_sans_io_ni_etat_global():

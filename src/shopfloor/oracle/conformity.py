@@ -30,10 +30,14 @@ def _check_measure(nc: NCRecord, m: Measurement, tolerances: ToleranceTable) -> 
     base = {"caracteristique": m.caracteristique, "valeur": m.valeur, "unite": m.unite}
 
     if spec is None:
+        if tolerances.has_part_ref(nc.part_ref):
+            motif = f"caractéristique inconnue : aucune tolérance pour {nc.part_ref} / {m.caracteristique}"
+        else:
+            motif = f"part_ref inconnu : aucune tolérance pour {nc.part_ref}"
         return MeasureResult(
             **base, spec_id=None, min=None, max=None, ecart=None,
             statut=Verdict.INDETERMINE,
-            motif=f"caractéristique inconnue : aucune tolérance pour {nc.part_ref} / {m.caracteristique}",
+            motif=motif,
         )
 
     bounds = {"spec_id": spec.id, "min": spec.min, "max": spec.max}
