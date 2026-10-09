@@ -1,0 +1,99 @@
+# Source unique de vérité des tolérances (données fictives).
+# Bornes incluses. min ou max peut valoir null (borne unilatérale), jamais les deux.
+# Unités autorisées : mm, pct, degC, deg, um, classe, GU.
+version: 1
+specs:
+  - id: CP-210.epaisseur
+    part_ref: CP-210
+    procede: composite
+    caracteristique: epaisseur
+    unite: mm
+    nominal: 3.20
+    min: 3.05
+    max: 3.35
+    resolution: 0.01
+    source: PROC-COMP-01
+
+  - id: CP-210.porosite
+    part_ref: CP-210
+    procede: composite
+    caracteristique: porosite
+    unite: pct
+    min: null
+    max: 2.0
+    resolution: 0.1
+    source: PROC-COMP-01
+
+  - id: CP-210.temperature_cuisson
+    part_ref: CP-210
+    procede: composite
+    caracteristique: temperature_cuisson
+    unite: degC
+    nominal: 180
+    min: 175
+    max: 185
+    resolution: 1
+    source: PROC-COMP-01
+
+  - id: SE-450.angle_pli
+    part_ref: SE-450
+    procede: tolerie
+    caracteristique: angle_pli
+    unite: deg
+    nominal: 90.0
+    min: 89.5
+    max: 90.5
+    resolution: 0.1
+    source: PROC-TOL-01
+
+  - id: SE-450.longueur
+    part_ref: SE-450
+    procede: tolerie
+    caracteristique: longueur
+    unite: mm
+    nominal: 250.0
+    min: 249.7
+    max: 250.3
+    resolution: 0.1
+    source: PROC-TOL-01
+
+  - id: SE-450.planeite
+    part_ref: SE-450
+    procede: tolerie
+    caracteristique: planeite
+    unite: mm
+    min: null
+    max: 0.5
+    resolution: 0.01
+    source: PROC-TOL-01
+
+  - id: PP-120.epaisseur_film
+    part_ref: PP-120
+    procede: peinture
+    caracteristique: epaisseur_film
+    unite: um
+    min: 60
+    max: 120
+    resolution: 1
+    source: PROC-PEI-01
+
+  - id: PP-120.adherence
+    part_ref: PP-120
+    procede: peinture
+    caracteristique: adherence
+    unite: classe
+    min: null
+    max: 1
+    resolution: 1
+    source: PROC-PEI-01
+
+  - id: PP-120.brillance
+    part_ref: PP-120
+    procede: peinture
+    caracteristique: brillance
+    unite: GU
+    nominal: 80
+    min: 75
+    max: 85
+    resolution: 1
+    source: PROC-PEI-01

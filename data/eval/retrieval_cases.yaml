@@ -1,0 +1,12 @@
+# Cas d'évaluation du retrieval (étape 4) : requête -> doc_id attendu. Données fictives.
+cases:
+  - query: "porosité élevée sur panneau carbone"
+    expected_doc_id: NC-2025-014
+  - query: "angle de pli hors tolérance après changement de lot de tôle inox"
+    expected_doc_id: NC-2025-031
+  - query: "épaisseur de poudre trop faible dans les angles rentrants du capot"
+    expected_doc_id: NC-2025-052
+  - query: "qui doit valider une dérogation sur une non-conformité"
+    expected_doc_id: PROC-QUA-01
+  - query: "ordre des opérations pour fabriquer le support plié SE-450"
+    expected_doc_id: GAMME-SE450
