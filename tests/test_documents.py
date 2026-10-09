@@ -118,9 +118,10 @@ def test_sync_tolerances_check_detecte_des_marqueurs_absents(tmp_path):
 # --- Fiches data/nc_inbox -----------------------------------------------------
 
 
-def test_trois_fiches_inbox_cles_requises_et_mesures_numeriques():
+def test_fiches_inbox_cles_requises_et_mesures_numeriques():
     fiches = sorted(INBOX.glob("*.md"))
-    assert [p.stem for p in fiches] == ["NC-2026-101", "NC-2026-102", "NC-2026-103"]
+    # Étape 9 : 12 fiches ajoutées aux 3 d'origine (NC-2026-101 à NC-2026-115).
+    assert [p.stem for p in fiches] == [f"NC-2026-{i}" for i in range(101, 116)]
     for p in fiches:
         meta, body = read_document(p)
         assert INBOX_KEYS <= set(meta), p.name

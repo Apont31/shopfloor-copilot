@@ -3,11 +3,13 @@
 python -m shopfloor.cli ingest
 python -m shopfloor.cli search "requête" [--k 4] [--domaine composite]
 python -m shopfloor.cli process <fiche> [--llm ollama|none] [--erp-url URL] [--valide-par NOM] [--decision approve|reject]
+python -m shopfloor.cli run-inbox [--llm ollama|none] [--erp-url URL] [--inbox DOSSIER]
+python -m shopfloor.cli pending
+python -m shopfloor.cli decide <nc_id> approve|reject|edit [--action "..."] --valide-par NOM [--commentaire "..."]
 """
 
 import argparse
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -19,33 +21,22 @@ from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.config import Settings
 from shopfloor.erp.client import ErpClient
 from shopfloor.errors import RAG_INDISPONIBLE, OllamaUnavailableError
+from shopfloor.llm.chrono import ChronoLLM
 from shopfloor.llm.ollama_client import OllamaLLM
 from shopfloor.oracle.loader import load_tolerances
 from shopfloor.rag.embeddings import OllamaEmbedder
 from shopfloor.rag.ingest import ingest
 from shopfloor.rag.retriever import make_retriever, retrieve_similar
+from shopfloor.service import Service, ServiceError, inbox_files
 
-TOLERANCES_PATH = Path(__file__).resolve().parents[2] / "config" / "tolerances.yaml"
+ROOT = Path(__file__).resolve().parents[2]
+TOLERANCES_PATH = ROOT / "config" / "tolerances.yaml"
+INBOX_DIR = ROOT / "data" / "nc_inbox"
 
 Decide = Callable[[dict], HumanDecision | dict]
 
 
 # --- process : logique testable -------------------------------------------------------------------
-
-
-class ChronoLLM:
-    """Enveloppe un LLMClient pour mesurer la durée de chaque appel (affichage uniquement)."""
-
-    def __init__(self, llm):
-        self.llm = llm
-        self.durations: list[float] = []
-
-    def complete_json(self, system: str, user: str, json_schema: dict) -> str:
-        t0 = time.perf_counter()
-        try:
-            return self.llm.complete_json(system, user, json_schema)
-        finally:
-            self.durations.append(time.perf_counter() - t0)
 
 
 def _fmt(v) -> str:
@@ -161,6 +152,87 @@ def ask_decision(payload: dict, valide_par: str | None = None, input_fn=input) -
             print("Choix invalide : tapez a, m ou r.")
 
 
+# --- run-inbox, pending, decide : logique testable ------------------------------------------------
+
+
+def _table(rows: list[tuple[str, ...]]) -> None:
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    for r in rows:
+        print("  " + "  ".join(cell.ljust(w) for cell, w in zip(r, widths)).rstrip())
+
+
+def _fmt_ms(ms: int | None) -> str:
+    return "-" if ms is None else f"{ms / 1000:.1f} s"
+
+
+def run_inbox(service: Service, inbox_dir: str | Path) -> int:
+    """Traite toute la boîte de réception et affiche le récapitulatif. Code 1 si une fiche est en erreur."""
+    total = len(inbox_files(inbox_dir))
+    results = service.process_inbox(inbox_dir)
+    print(f"Boîte de réception : {inbox_dir}")
+    print(f"{total} fiche(s), {len(results)} traitée(s), {total - len(results)} déjà journalisée(s) ignorée(s)")
+    if not results:
+        return 0
+    print()
+    rows = [("Fiche", "Verdict", "Statut", "Origine", "LLM", "Détail")]
+    rows += [(r.nc_id, _fmt(r.verdict), r.statut, r.origine, _fmt_ms(r.llm_ms), r.erreur or "") for r in results]
+    _table(rows)
+    statuts: dict[str, int] = {}
+    for r in results:
+        statuts[r.statut] = statuts.get(r.statut, 0) + 1
+    print("\nRécapitulatif : " + ", ".join(f"{n} {s}" for s, n in statuts.items()))
+    llm_ms = [r.llm_ms for r in results if r.llm_ms is not None]
+    print(f"Appels LLM : {_fmt_ms(sum(llm_ms)) if llm_ms else 'aucun'}")
+    return 1 if "erreur" in statuts else 0
+
+
+def print_pending(service: Service) -> int:
+    items = service.list_pending()
+    print(f"File de validation : {len(items)} fiche(s) en attente")
+    for it in items:
+        run = it.run
+        print(f"\n{run.nc_id}  {_fmt(it.verdict)}  - pièce {run.part_ref} ({run.procede}), {run.site}, "
+              f"traitée le {run.created_at:%Y-%m-%d %H:%M} UTC")
+        for m in it.mesures:
+            print(f"  Mesure      : {m['caracteristique']} {fmt_mesure(m['valeur'], m['unite'])} "
+                  f"(min {_fmt(m['min'])}, max {_fmt(m['max'])}) {m['statut']}")
+        p = it.proposition
+        if p is None:
+            print("  ERREUR : état de validation introuvable dans la base d'état")
+            continue
+        print(f"  Proposition : origine {p['origine']}, décision suggérée {p['decision_suggeree']}")
+        print(f"  Action      : {p['action_corrective']}")
+        print(f"  Sources     : {', '.join(it.sources) or 'aucune'}")
+        if it.alerte_garde_fou:
+            print("  ALERTE garde-fou :")
+            for motif in it.alerte_garde_fou:
+                print(f"    - {motif}")
+    return 0
+
+
+def run_decide(
+    service: Service,
+    nc_id: str,
+    decision: str,
+    valide_par: str,
+    action: str | None = None,
+    commentaire: str | None = None,
+) -> int:
+    try:
+        run = service.decide(nc_id, decision, valide_par, action=action, commentaire=commentaire)
+    except ServiceError as e:
+        print(f"ERREUR : {e}")
+        return 1
+    if run.statut == "erreur":
+        print(f"ERREUR : {run.nc_id} : {run.erreur}")
+        return 1
+    if run.ticket_id is not None:
+        print(f"{run.nc_id} : {run.statut} par {run.decided_by}, ticket créé : {run.ticket_id}")
+    else:
+        print(f"{run.nc_id} : {run.statut} par {run.decided_by}, aucun ticket créé")
+    return 0
+
+
 # --- CLI : couche fine ----------------------------------------------------------------------------
 
 
@@ -178,9 +250,23 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
     p_process.add_argument("--erp-url", help="URL de l'API ERP (défaut : ERP_URL)")
     p_process.add_argument("--valide-par", help="nom du valideur (demandé si absent en mode interactif)")
     p_process.add_argument("--decision", choices=["approve", "reject"], help="sans cette option, la décision est demandée")
+    p_inbox = sub.add_parser("run-inbox", help="traite toutes les nouvelles fiches et les met en file de validation")
+    p_inbox.add_argument("--llm", choices=["ollama", "none"], default="ollama")
+    p_inbox.add_argument("--erp-url", help="URL de l'API ERP (défaut : ERP_URL)")
+    p_inbox.add_argument("--inbox", default=str(INBOX_DIR), help="dossier des fiches (défaut : data/nc_inbox)")
+    sub.add_parser("pending", help="liste la file de validation")
+    p_decide = sub.add_parser("decide", help="valide, modifie ou rejette une fiche en attente")
+    p_decide.add_argument("nc_id")
+    p_decide.add_argument("decision", choices=["approve", "reject", "edit"])
+    p_decide.add_argument("--action", help="action corrective modifiée (obligatoire avec edit)")
+    p_decide.add_argument("--valide-par", required=True, help="nom du valideur")
+    p_decide.add_argument("--commentaire")
+    p_decide.add_argument("--erp-url", help="URL de l'API ERP (défaut : ERP_URL)")
     args = parser.parse_args(argv)
     if args.command == "process" and args.decision and not args.valide_par:
         parser.error("--decision exige --valide-par")
+    if args.command == "decide" and (args.decision == "edit") != (args.action is not None):
+        parser.error("--action est obligatoire avec edit, et seulement avec edit")
 
     settings = Settings()
     embedder = embedder or OllamaEmbedder(settings)
@@ -212,6 +298,23 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
                 erp=erp,
             )
             return run_process(args.fiche, deps, decide)
+
+    if args.command in ("run-inbox", "pending", "decide"):
+        # pending et decide n'appellent ni le LLM ni la recherche : le retriever reste inutilisé.
+        llm = OllamaLLM(settings) if getattr(args, "llm", "none") == "ollama" else None
+        with ErpClient(getattr(args, "erp_url", None) or settings.erp_url) as erp:
+            deps = Deps(
+                tolerances=load_tolerances(TOLERANCES_PATH),
+                retriever=make_retriever(settings.chroma_dir, embedder),
+                llm=llm,
+                erp=erp,
+            )
+            with Service(deps, state_db=settings.state_db, journal_db=settings.journal_db) as service:
+                if args.command == "run-inbox":
+                    return run_inbox(service, args.inbox)
+                if args.command == "pending":
+                    return print_pending(service)
+                return run_decide(service, args.nc_id, args.decision, args.valide_par, args.action, args.commentaire)
 
     where = {"domaine": args.domaine} if args.domaine else None
     try:

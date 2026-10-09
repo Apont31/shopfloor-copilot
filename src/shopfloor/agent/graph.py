@@ -5,12 +5,19 @@ parse_nc -> check_existing -> oracle -> [NON_CONFORME] retrieve_similar -> propo
 human_gate -> [approve, edit] create_ticket
 Une fiche illisible s'arrête après parse_nc ; une fiche déjà traitée ou un ERP injoignable après check_existing ; un index RAG ou Ollama indisponible après retrieve_similar ;
 un rejet humain s'arrête après human_gate.
+
+Checkpointer : InMemorySaver par défaut ; SqliteSaver (sqlite_checkpointer) pour reprendre une validation après un redémarrage.
 """
 
+import copy
+import sqlite3
 from pathlib import Path
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.base import maybe_add_typed_methods
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -20,7 +27,10 @@ from shopfloor.agent.state import CHECKPOINT_TYPES, AgentState, HumanDecision
 from shopfloor.models import Verdict
 from shopfloor.nc import NCParseError, parse_nc_file
 
-__all__ = ["Deps", "build_graph", "thread_config", "initial_state", "start", "resume", "get_state"]
+__all__ = [
+    "Deps", "build_graph", "checkpoint_serde", "sqlite_checkpointer", "thread_config", "nc_id_of",
+    "initial_state", "start", "resume", "get_state",
+]
 
 # Champs que chaque nœud a le droit d'écrire. Seul le nœud oracle écrit « oracle ».
 WRITES: dict[str, frozenset[str]] = {
@@ -70,7 +80,25 @@ def _after_human(state: AgentState) -> str:
     return "create_ticket" if state.human.decision in ("approve", "edit") else END
 
 
-def build_graph(deps: Deps):
+def checkpoint_serde() -> JsonPlusSerializer:
+    """Désérialisation du checkpoint limitée aux types de l'état (pas d'objet arbitraire)."""
+    return JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
+
+
+def sqlite_checkpointer(path: str | Path) -> SqliteSaver:
+    """Checkpointer persistant. check_same_thread=False : l'interface Streamlit appellera le graphe
+    depuis plusieurs threads ; SqliteSaver sérialise lui-même les accès par un verrou."""
+    return SqliteSaver(sqlite3.connect(str(path), check_same_thread=False), serde=checkpoint_serde())
+
+
+def _restricted(checkpointer: BaseCheckpointSaver) -> BaseCheckpointSaver:
+    """Copie du checkpointer reçu avec le sérialiseur restreint, quel que soit celui fourni par l'appelant."""
+    clone = copy.copy(checkpointer)
+    clone.serde = maybe_add_typed_methods(checkpoint_serde())
+    return clone
+
+
+def build_graph(deps: Deps, checkpointer: BaseCheckpointSaver | None = None):
     builder = StateGraph(AgentState)
     for name in WRITES:
         builder.add_node(name, _bind(name, deps))
@@ -83,9 +111,8 @@ def build_graph(deps: Deps):
     builder.add_edge("propose_default", "human_gate")
     builder.add_conditional_edges("human_gate", _after_human, ["create_ticket", END])
     builder.add_edge("create_ticket", END)
-    # Désérialisation du checkpoint limitée aux types de l'état (pas d'objet arbitraire).
-    serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
-    return builder.compile(checkpointer=InMemorySaver(serde=serde))
+    saver = InMemorySaver(serde=checkpoint_serde()) if checkpointer is None else _restricted(checkpointer)
+    return builder.compile(checkpointer=saver)
 
 
 def thread_config(nc_id: str) -> dict:
@@ -97,7 +124,8 @@ def initial_state(nc_path: str | Path) -> dict:
     return AgentState(nc_path=str(nc_path)).model_dump()
 
 
-def _thread_id(nc_path: str | Path) -> str:
+def nc_id_of(nc_path: str | Path) -> str:
+    """Identifiant de thread d'une fiche : son nc_id, ou le nom du fichier si elle est illisible."""
     try:
         return parse_nc_file(nc_path).nc_id
     except NCParseError:
@@ -106,7 +134,7 @@ def _thread_id(nc_path: str | Path) -> str:
 
 def start(graph, nc_path: str | Path) -> dict:
     """Lance le traitement d'une fiche (thread_id = nc_id). Renvoie la config du thread."""
-    config = thread_config(_thread_id(nc_path))
+    config = thread_config(nc_id_of(nc_path))
     graph.invoke(initial_state(nc_path), config)
     return config
 

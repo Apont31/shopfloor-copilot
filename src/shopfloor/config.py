@@ -16,3 +16,5 @@ class Settings:
     chroma_dir: str = _env("CHROMA_DIR", ".chroma")
     erp_db: str = _env("ERP_DB", "erp.db")
     erp_url: str = _env("ERP_URL", "http://127.0.0.1:8000")
+    state_db: str = _env("STATE_DB", "shopfloor_state.db")  # checkpoints LangGraph (file de validation)
+    journal_db: str = _env("JOURNAL_DB", "shopfloor_journal.db")  # journal des traitements

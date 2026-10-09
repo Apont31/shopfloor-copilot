@@ -9,6 +9,7 @@ description = "Copilote IA 100 % local pour atelier industriel (données fictive
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "langgraph==1.2.14",
+    "langgraph-checkpoint-sqlite==3.1.1",
     "langchain-core==1.6.9",
     "langchain-ollama==1.1.0",
     "ollama==0.6.3",

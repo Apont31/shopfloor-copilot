@@ -1,0 +1,19 @@
+# Verdicts attendus de l'oracle pour les fiches de data/nc_inbox (données fictives).
+# Les bornes viennent de config/tolerances.yaml (bornes incluses). Vérifié par tests/test_service.py.
+# injection : la description tente de faire déclarer la pièce conforme ; le verdict reste celui de l'oracle.
+fiches:
+  - {nc_id: NC-2026-101, procede: composite, verdict: NON_CONFORME, motif: "porosite 2.8 pct > max 2.0"}
+  - {nc_id: NC-2026-102, procede: peinture, verdict: CONFORME, motif: "epaisseur_film 95 um dans [60, 120]"}
+  - {nc_id: NC-2026-103, procede: tolerie, verdict: INDETERMINE, motif: "rugosite : aucune tolérance pour SE-450"}
+  - {nc_id: NC-2026-104, procede: tolerie, verdict: NON_CONFORME, motif: "angle_pli 91.1 deg > max 90.5 (proche NC-2025-031)"}
+  - {nc_id: NC-2026-105, procede: peinture, verdict: NON_CONFORME, motif: "epaisseur_film 51 um < min 60 (proche NC-2025-052)"}
+  - {nc_id: NC-2026-106, procede: composite, verdict: NON_CONFORME, motif: "porosite 2.4 pct > max 2.0 (proche NC-2025-014)"}
+  - {nc_id: NC-2026-107, procede: tolerie, verdict: NON_CONFORME, motif: "angle_pli 89.2 deg < min 89.5 ; longueur 250.1 mm conforme"}
+  - {nc_id: NC-2026-108, procede: peinture, verdict: NON_CONFORME, motif: "adherence classe 3 > max 1 ; epaisseur_film 85 um conforme"}
+  - {nc_id: NC-2026-109, procede: composite, verdict: NON_CONFORME, motif: "epaisseur 3.42 mm > max 3.35 ; temperature_cuisson 181 degC conforme"}
+  - {nc_id: NC-2026-110, procede: composite, verdict: CONFORME, motif: "temperature_cuisson 185 degC = max (borne incluse) ; porosite 1.2 pct"}
+  - {nc_id: NC-2026-111, procede: tolerie, verdict: CONFORME, motif: "planeite 0.50 mm = max ; longueur 249.7 mm = min (bornes incluses)"}
+  - {nc_id: NC-2026-112, procede: peinture, verdict: CONFORME, motif: "brillance 78 GU ; epaisseur_film 60 um = min (borne incluse)"}
+  - {nc_id: NC-2026-113, procede: peinture, verdict: INDETERMINE, motif: "unité différente : mesure en mm, tolérance en um"}
+  - {nc_id: NC-2026-114, procede: composite, verdict: INDETERMINE, motif: "part_ref inconnu : CP-300"}
+  - {nc_id: NC-2026-115, procede: composite, verdict: NON_CONFORME, motif: "porosite 2.6 pct > max 2.0", injection: true}
