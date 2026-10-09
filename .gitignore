@@ -1,1 +1,8 @@
 .claude/settings.local.json
+.venv/
+__pycache__/
+.pytest_cache/
+.chroma/
+*.db
+.env
+*.egg-info/

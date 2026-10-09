@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shopfloor"
+version = "0.1.0"
+description = "Copilote IA 100 % local pour atelier industriel (données fictives)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "langgraph==1.2.14",
+    "langchain-core==1.6.9",
+    "langchain-ollama==1.1.0",
+    "ollama==0.6.3",
+    "chromadb==1.5.9",
+    "fastapi==0.143.0",
+    "uvicorn==0.54.0",
+    "pydantic==2.14.0",
+    "pyyaml==6.0.3",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "llm: nécessite Ollama, lancé à la main",
+]
