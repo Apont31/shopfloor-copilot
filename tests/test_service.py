@@ -17,7 +17,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from shopfloor.agent.graph import Deps, build_graph, get_state, sqlite_checkpointer, start, thread_config
 from shopfloor.agent.state import CHECKPOINT_TYPES
 from shopfloor.erp.api import create_app
-from shopfloor.erp.client import ErpClient
+from shopfloor.erp.client import ErpClient, ErpUnavailableError
 from shopfloor.erp.schemas import TicketCreate
 from shopfloor.models import Verdict
 from shopfloor.nc import parse_nc_file
@@ -339,14 +339,142 @@ def test_reprise_apres_redemarrage_approve_et_edit(tmp_path):
         assert statuts == {"NC-2026-101": "approuve", "NC-2026-102": "modifie", "NC-2026-103": "en_attente"}
 
 
-def test_reprise_erp_injoignable_au_moment_de_la_decision(tmp_path, erp):
+@pytest.mark.parametrize("decision, action", [("approve", None), ("edit", "Contrôler la teinte sur trois capots.")])
+def test_reprise_erp_injoignable_au_moment_de_la_decision(tmp_path, erp, decision, action):
+    """ERP arrêté : la décision est refusée avant la reprise du graphe ; ERP relancé : elle aboutit."""
     with make_service(tmp_path, erp.client) as service:
         service.process_inbox(inbox_with(tmp_path, "NC-2026-102"))
     with make_service(tmp_path, ErpClient("http://127.0.0.1:9", timeout=0.5)) as service:
+        with pytest.raises(ErpUnavailableError, match="ERP indisponible : lancez le serveur ERP"):
+            service.decide("NC-2026-102", decision, VALIDEUR, action=action)
+        run = service.journal.get_run("NC-2026-102")
+        assert (run.statut, run.decided_by, run.decided_at, run.erreur) == ("en_attente", None, None, None)
+        # Checkpoint intact : toujours en attente à human_gate, sans décision enregistrée.
+        assert service.graph.get_state(thread_config("NC-2026-102")).interrupts
+        assert get_state(service.graph, thread_config("NC-2026-102")).human is None
+        assert [p.run.nc_id for p in service.list_pending()] == ["NC-2026-102"]
+    assert erp.tickets() == []
+
+    with make_service(tmp_path, Erp(tmp_path / "erp.db").client) as service:  # ERP relancé
+        run = service.decide("NC-2026-102", decision, VALIDEUR, action=action)
+    [ticket] = erp.tickets()
+    assert (run.statut, run.ticket_id) == ({"approve": "approuve", "edit": "modifie"}[decision], ticket["id"])
+
+
+def test_rejet_sans_erp(tmp_path, erp):
+    """Un rejet ne crée pas de ticket : il est enregistré même avec l'ERP arrêté."""
+    with make_service(tmp_path, erp.client) as service:
+        service.process_inbox(inbox_with(tmp_path, "NC-2026-102"))
+    with make_service(tmp_path, ErpClient("http://127.0.0.1:9", timeout=0.5)) as service:
+        run = service.decide("NC-2026-102", "reject", VALIDEUR)
+    assert (run.statut, run.ticket_id) == ("rejete", None)
+
+
+class ErpTombeApresVerification:
+    """ERP qui répond à /health puis tombe avant la création du ticket."""
+
+    def __init__(self, client: ErpClient):
+        self.client = client
+
+    def health(self) -> None:
+        self.client.health()
+
+    def find_by_nc_id(self, nc_id):
+        return self.client.find_by_nc_id(nc_id)
+
+    def create_ticket(self, payload):
+        raise ErpUnavailableError("ERP injoignable : ConnectError")
+
+
+def test_erp_tombe_entre_verification_et_creation_statut_erreur(tmp_path, erp):
+    with make_service(tmp_path, erp.client) as service:
+        service.process_inbox(inbox_with(tmp_path, "NC-2026-102"))
+    with make_service(tmp_path, ErpTombeApresVerification(erp.client)) as service:
         run = service.decide("NC-2026-102", "approve", VALIDEUR)
     assert (run.statut, run.decided_by, run.ticket_id) == ("erreur", VALIDEUR, None)
     assert run.erreur == "décision approuve, ticket non créé : ERP indisponible"
     assert erp.tickets() == []
+
+
+# --- retry ----------------------------------------------------------------------------------------
+
+
+def test_retry_erreur_puis_fiche_traitee(tmp_path, erp):
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102")
+    with make_service(tmp_path, ErpClient("http://127.0.0.1:9", timeout=0.5)) as service:
+        assert {r.statut for r in service.process_inbox(inbox)} == {"erreur"}
+
+    llm = FakeLLM(proposal_json(sources=[]))
+    with make_service(tmp_path, erp.client, llm) as service:
+        assert service.process_inbox(inbox) == []  # une erreur n'est pas retraitée sans relance
+        service.retry("NC-2026-101")
+        assert service.journal.get_run("NC-2026-101") is None
+        assert service.graph.get_state(thread_config("NC-2026-101")).values == {}
+        [r] = service.process_inbox(inbox)
+        assert (r.nc_id, r.statut, r.verdict, r.origine) == ("NC-2026-101", "en_attente", "NON_CONFORME", "llm")
+        assert llm.n_calls == 1
+        run = service.decide("NC-2026-101", "approve", VALIDEUR)
+        assert run.statut == "approuve" and len(erp.tickets()) == 1
+        assert service.journal.get_run("NC-2026-102").statut == "erreur"
+
+
+def test_retry_apres_ticket_non_cree(tmp_path, erp):
+    """Décision prise mais ticket non créé (statut erreur) : la relance repart du début de la fiche."""
+    inbox = inbox_with(tmp_path, "NC-2026-102")
+    with make_service(tmp_path, erp.client) as service:
+        service.process_inbox(inbox)
+    with make_service(tmp_path, ErpTombeApresVerification(erp.client)) as service:
+        assert service.decide("NC-2026-102", "approve", VALIDEUR).statut == "erreur"
+    with make_service(tmp_path, erp.client) as service:
+        service.retry("NC-2026-102")
+        [r] = service.process_inbox(inbox)
+        assert r.statut == "en_attente"
+        assert get_state(service.graph, thread_config("NC-2026-102")).human is None
+        assert service.decide("NC-2026-102", "approve", VALIDEUR).statut == "approuve"
+    assert len(erp.tickets()) == 1
+
+
+def test_retry_refuse_hors_erreur(en_attente):
+    with pytest.raises(ServiceError, match="absente du journal"):
+        en_attente.retry("NC-INCONNUE")
+    with pytest.raises(ServiceError, match=r"n'est pas en erreur \(statut : en_attente\)"):
+        en_attente.retry("NC-2026-101")
+    assert en_attente.graph.get_state(thread_config("NC-2026-101")).interrupts
+
+
+def test_retry_refuse_un_doublon(tmp_path, erp):
+    erp.client.create_ticket(TicketCreate(
+        nc_id="NC-2026-102", part_ref="CP-210", procede="composite", site="Site fictif",
+        verdict="CONFORME", rules_hash=TOLERANCES.rules_hash, action_proposee="Action déjà engagée.",
+        sources=[], valide_par=VALIDEUR,
+    ))
+    with make_service(tmp_path, erp.client) as service:
+        service.process_inbox(inbox_with(tmp_path, "NC-2026-102"))
+        with pytest.raises(ServiceError, match="statut : doublon"):
+            service.retry("NC-2026-102")
+
+
+# --- Progression et documents similaires ----------------------------------------------------------
+
+
+def test_process_inbox_progression(tmp_path, erp):
+    """Progression appelée avant chaque fiche à traiter, les fiches déjà journalisées exclues du compte."""
+    inbox = inbox_with(tmp_path, "NC-2026-102")
+    appels = []
+    with make_service(tmp_path, erp.client) as service:
+        service.process_inbox(inbox)
+        for nc_id in ("NC-2026-101", "NC-2026-103"):
+            shutil.copy(INBOX / f"{nc_id}.md", inbox / f"{nc_id}.md")
+        service.process_inbox(inbox, progress=lambda i, n, nc_id: appels.append((i, n, nc_id)))
+    assert appels == [(1, 2, "NC-2026-101"), (2, 2, "NC-2026-103")]
+
+
+def test_list_pending_documents_similaires(en_attente):
+    p101, p102 = en_attente.list_pending()
+    assert [c.doc_id for c in p101.similaires] == ["NC-2025-014", "PROC-COMP-01", "PROC-QUA-01"]
+    assert p101.similaires[0].score == 0.82
+    assert [c.section for c in p101.passages][:2] == ["Cause racine", "Action corrective"]
+    assert (p102.similaires, p102.passages) == ([], [])
 
 
 def test_base_d_etat_perdue(tmp_path, erp):

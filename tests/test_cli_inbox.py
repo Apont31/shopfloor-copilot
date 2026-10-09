@@ -140,7 +140,9 @@ def test_run_decide_erp_injoignable_code_1(tmp_path, inbox, erp_http, capsys):
         service.process_inbox(inbox)
     with make_service(tmp_path, ErpClient("http://127.0.0.1:9", timeout=0.5)) as service:
         assert cli.run_decide(service, "NC-2026-102", "approve", VALIDEUR) == 1
-    assert "ERREUR : NC-2026-102 : décision approuve, ticket non créé : ERP indisponible" in capsys.readouterr().out
+        assert service.journal.get_run("NC-2026-102").statut == "en_attente"
+    assert ("ERREUR : NC-2026-102 : ERP indisponible : lancez le serveur ERP. "
+            "La fiche reste en attente de validation.") in capsys.readouterr().out
 
 
 # --- Couche CLI (main) ----------------------------------------------------------------------------
@@ -183,6 +185,29 @@ def test_main_decide_sur_le_journal_partage(env, inbox, erp_http, capsys):
     assert "NC-2026-102 : rejete par Chef d'atelier fictif, aucun ticket créé" in capsys.readouterr().out
     assert cli.main(["decide", "NC-2026-102", "approve", "--valide-par", VALIDEUR], embedder=FakeEmbedder()) == 1
     assert "n'est pas en attente de validation (statut : rejete)" in capsys.readouterr().out
+
+
+def test_run_retry(tmp_path, inbox, erp_http, capsys):
+    with make_service(tmp_path, ErpClient("http://127.0.0.1:9", timeout=0.5)) as service:
+        service.process_inbox(inbox)
+    with make_service(tmp_path, ErpClient("http://testserver", http_client=erp_http)) as service:
+        assert cli.run_retry(service, "NC-2026-102") == 0
+        assert "NC-2026-102 : sera traitée de nouveau au prochain run-inbox" in capsys.readouterr().out
+        assert [r.nc_id for r in service.process_inbox(inbox)] == ["NC-2026-102"]
+        assert service.journal.get_run("NC-2026-102").statut == "en_attente"
+        assert cli.run_retry(service, "NC-2026-102") == 1
+        assert "ERREUR : NC-2026-102 n'est pas en erreur (statut : en_attente)" in capsys.readouterr().out
+
+
+def test_main_retry(env, inbox, capsys):
+    cli.main(["run-inbox", "--llm", "none", "--erp-url", "http://127.0.0.1:9", "--inbox", str(inbox)],
+             embedder=FakeEmbedder())
+    capsys.readouterr()
+    assert cli.main(["retry", "NC-2026-101"], embedder=FakeEmbedder()) == 0
+    assert "NC-2026-101 : sera traitée de nouveau" in capsys.readouterr().out
+    code = cli.main(["run-inbox", "--llm", "none", "--erp-url", "http://127.0.0.1:9", "--inbox", str(inbox)],
+                    embedder=FakeEmbedder())
+    assert code == 1 and "1 traitée(s), 2 déjà journalisée(s)" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("argv, message", [

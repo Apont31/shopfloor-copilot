@@ -15,7 +15,7 @@ from shopfloor.agent.guard import GuardResult, check_proposal
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.erp.client import ErpClient, ErpConflictError, ErpError, ErpUnavailableError
 from shopfloor.erp.schemas import TicketCreate
-from shopfloor.errors import OLLAMA_INDISPONIBLE, RAG_INDISPONIBLE, OllamaUnavailableError
+from shopfloor.errors import OLLAMA_INDISPONIBLE, RAG_INDISPONIBLE, TICKET_EXISTANT, OllamaUnavailableError
 from shopfloor.llm.client import LLMClient, LLMError
 from shopfloor.llm.prompts import build_proposal_prompt, build_retry_user, proposal_json_schema
 from shopfloor.models import ActionProposal, NCRecord, OracleResult, ToleranceTable, Verdict
@@ -61,7 +61,7 @@ def check_existing(state: AgentState, deps: Deps) -> dict:
     except ErpError as e:
         return {"error": f"erreur ERP : {e}"}
     if existing is not None:
-        return {"error": f"Ticket déjà existant pour {nc_id} : {existing.id}"}
+        return {"error": f"{TICKET_EXISTANT} {nc_id} : {existing.id}"}
     return {}
 
 

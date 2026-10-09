@@ -83,6 +83,27 @@ def test_api_injoignable():
         erp.get_ticket("TCK-0001")
 
 
+def test_health(erp):
+    assert erp.health() is None
+
+
+def test_health_injoignable():
+    with pytest.raises(ErpUnavailableError):
+        ErpClient("http://127.0.0.1:9", timeout=0.5).health()
+
+
+def test_list_tickets(erp):
+    assert erp.list_tickets() == []
+    first = erp.create_ticket(payload())
+    second = erp.create_ticket(payload(nc_id="NC-TEST-002"))
+    assert erp.list_tickets() == [first, second]
+
+
+def test_list_tickets_injoignable():
+    with pytest.raises(ErpUnavailableError):
+        ErpClient("http://127.0.0.1:9", timeout=0.5).list_tickets()
+
+
 def test_verdict_literal_aligne_sur_enum():
     """Seul test autorisé à importer shopfloor.models : l'ERP ne dépend pas du cœur."""
     literal = TicketCreate.model_fields["verdict"].annotation

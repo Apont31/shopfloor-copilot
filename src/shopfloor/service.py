@@ -4,7 +4,8 @@ Seule cette couche écrit le journal ; les nœuds du graphe l'ignorent. L'état 
 est gardé par le checkpointer SQLite : une validation reprend après un redémarrage du processus.
 """
 
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -20,12 +21,15 @@ from shopfloor.agent.graph import (
     start,
     thread_config,
 )
-from shopfloor.agent.state import HumanDecision
+from shopfloor.agent.state import AgentState, HumanDecision
+from shopfloor.erp.client import ErpUnavailableError
+from shopfloor.errors import ERP_INDISPONIBLE, TICKET_EXISTANT
 from shopfloor.journal import Journal, Run
 from shopfloor.llm.chrono import ChronoLLM
+from shopfloor.rag.retriever import RetrievedChunk
 
-# Message écrit par le nœud check_existing quand un ticket porte déjà le nc_id : « ... : TCK-0001 ».
-_DOUBLON = "Ticket déjà existant pour "
+# Progression de process_inbox : (rang à partir de 1, nombre de fiches à traiter, nc_id), avant chaque fiche.
+Progress = Callable[[int, int, str], None]
 _STATUT_DECISION = {"approve": "approuve", "edit": "modifie", "reject": "rejete"}
 
 
@@ -49,6 +53,8 @@ class PendingItem:
     """Fiche en attente : ligne du journal + ce que voit le valideur, lu dans le checkpointer.
 
     proposition vaut None si l'état n'est plus dans la base d'état (fichier supprimé ou remplacé).
+    similaires : meilleur passage de chaque document retenu par la recherche ; passages : tous les passages
+    retrouvés de ces documents. Listes vides sans recherche (CONFORME, INDETERMINE).
     """
 
     run: Run
@@ -57,6 +63,8 @@ class PendingItem:
     proposition: dict | None
     sources: list[str]
     alerte_garde_fou: list[str] | None
+    similaires: list[RetrievedChunk] = field(default_factory=list)
+    passages: list[RetrievedChunk] = field(default_factory=list)
 
 
 def inbox_files(inbox_dir: str | Path) -> list[Path]:
@@ -75,6 +83,7 @@ class Service:
 
     def __init__(self, deps: Deps, *, state_db: str | Path, journal_db: str | Path):
         self.chrono = ChronoLLM(deps.llm) if deps.llm is not None else None
+        self.erp = deps.erp
         self._saver = sqlite_checkpointer(state_db)
         try:
             self.graph = build_graph(replace(deps, llm=self.chrono) if self.chrono else deps, self._saver)
@@ -95,16 +104,22 @@ class Service:
 
     # --- Traitement automatique -------------------------------------------------------------------
 
-    def process_inbox(self, inbox_dir: str | Path) -> list[RunSummary]:
+    def process_inbox(self, inbox_dir: str | Path, progress: Progress | None = None) -> list[RunSummary]:
         """Traite chaque fiche dont le nc_id n'est pas encore journalisé, jusqu'à la validation humaine.
 
-        Une fiche déjà journalisée, quel que soit son statut, est ignorée.
+        Une fiche déjà journalisée, quel que soit son statut, est ignorée (relance d'une erreur : retry).
+        progress, s'il est fourni, est appelé avant chaque fiche traitée.
         """
-        results = []
+        todo = []
         for path in inbox_files(inbox_dir):
             nc_id = nc_id_of(path)
             if self.journal.get_run(nc_id) is None:
-                results.append(_summary(self._process(path, nc_id)))
+                todo.append((path, nc_id))
+        results = []
+        for i, (path, nc_id) in enumerate(todo, 1):
+            if progress is not None:
+                progress(i, len(todo), nc_id)
+            results.append(_summary(self._process(path, nc_id)))
         return results
 
     def _process(self, path: Path, nc_id: str) -> Run:
@@ -120,7 +135,7 @@ class Service:
         fiche = {"site": nc.site, "procede": nc.procede, "part_ref": nc.part_ref} if nc else {}
         verdict = state.oracle.verdict.value if state.oracle else None
         if state.error is not None:
-            doublon = state.error.startswith(_DOUBLON)
+            doublon = state.error.startswith(TICKET_EXISTANT)
             return self.journal.record_error(
                 nc_id=nc_id, fichier=path.name, erreur=state.error, verdict=verdict, **fiche,
                 statut="doublon" if doublon else "erreur",
@@ -140,8 +155,9 @@ class Service:
     def list_pending(self) -> list[PendingItem]:
         items = []
         for run in self.journal.list_runs(statut="en_attente"):
-            interrupts = self.graph.get_state(thread_config(run.nc_id)).interrupts
-            review = interrupts[0].value if interrupts else {}
+            snapshot = self.graph.get_state(thread_config(run.nc_id))
+            review = snapshot.interrupts[0].value if snapshot.interrupts else {}
+            state = AgentState.model_validate(snapshot.values) if snapshot.values else None
             items.append(PendingItem(
                 run=run,
                 verdict=review.get("verdict", run.verdict),
@@ -149,6 +165,8 @@ class Service:
                 proposition=review.get("proposition"),
                 sources=review.get("sources", []),
                 alerte_garde_fou=review.get("alerte_garde_fou"),
+                similaires=list(state.similar) if state else [],
+                passages=list(state.passages) if state else [],
             ))
         return items
 
@@ -162,7 +180,9 @@ class Service:
     ) -> Run:
         """Reprend le graphe avec la décision humaine et met à jour le journal.
 
-        Ticket non créé après approve ou edit (ERP injoignable, conflit) : statut erreur, avec le motif.
+        approve ou edit avec l'ERP injoignable : ErpUnavailableError levée avant la reprise du graphe ; la fiche
+        reste en attente et son checkpoint est intact. Ticket non créé malgré tout (ERP tombé entre la vérification
+        et la création, conflit) : statut erreur, avec le motif.
         """
         run = self.journal.get_run(nc_id)
         if run is None:
@@ -181,6 +201,11 @@ class Service:
         config = thread_config(nc_id)
         if not self.graph.get_state(config).interrupts:
             raise ServiceError(f"{nc_id} : état de validation introuvable dans la base d'état")
+        if decision in ("approve", "edit"):  # un rejet ne crée pas de ticket : l'ERP n'est pas nécessaire
+            try:
+                self.erp.health()
+            except ErpUnavailableError as e:
+                raise ErpUnavailableError(ERP_INDISPONIBLE) from e
         resume(self.graph, config, human)
         state = get_state(self.graph, config)
 
@@ -194,3 +219,18 @@ class Service:
             nc_id, statut=statut, decided_by=human.valide_par,
             ticket_id=state.ticket.id if state.ticket is not None else None,
         )
+
+    # --- Relance ----------------------------------------------------------------------------------
+
+    def retry(self, nc_id: str) -> None:
+        """Fiche en erreur : efface sa ligne du journal et son thread du checkpoint.
+
+        Elle sera traitée de nouveau, depuis le début, au prochain process_inbox.
+        """
+        run = self.journal.get_run(nc_id)
+        if run is None:
+            raise ServiceError(f"{nc_id} : fiche absente du journal")
+        if run.statut != "erreur":
+            raise ServiceError(f"{nc_id} n'est pas en erreur (statut : {run.statut})")
+        self._saver.delete_thread(nc_id)
+        self.journal.delete_error(nc_id)

@@ -1,0 +1,22 @@
+# Configuration Streamlit de ShopFloor Copilot (lue depuis la racine du dépôt).
+
+[browser]
+# 100 % local : aucune statistique d'usage envoyée.
+gatherUsageStats = false
+
+[server]
+# Écoute locale uniquement.
+address = "127.0.0.1"
+
+[client]
+toolbarMode = "minimal"
+
+# Thème « atelier » : fond graphite, accent ambre sécurité, police sans-serif.
+[theme]
+base = "dark"
+primaryColor = "#FFB000"
+backgroundColor = "#1B1E22"
+secondaryBackgroundColor = "#262A30"
+textColor = "#E8E6E1"
+font = "sans-serif"
+borderColor = "#3A3F47"

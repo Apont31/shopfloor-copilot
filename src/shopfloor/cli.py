@@ -6,6 +6,7 @@ python -m shopfloor.cli process <fiche> [--llm ollama|none] [--erp-url URL] [--v
 python -m shopfloor.cli run-inbox [--llm ollama|none] [--erp-url URL] [--inbox DOSSIER]
 python -m shopfloor.cli pending
 python -m shopfloor.cli decide <nc_id> approve|reject|edit [--action "..."] --valide-par NOM [--commentaire "..."]
+python -m shopfloor.cli retry <nc_id>
 """
 
 import argparse
@@ -19,7 +20,7 @@ from chromadb.errors import NotFoundError
 from shopfloor.agent.graph import Deps, build_graph, get_state, resume, start
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.config import Settings
-from shopfloor.erp.client import ErpClient
+from shopfloor.erp.client import ErpClient, ErpError
 from shopfloor.errors import RAG_INDISPONIBLE, OllamaUnavailableError
 from shopfloor.llm.chrono import ChronoLLM
 from shopfloor.llm.ollama_client import OllamaLLM
@@ -223,6 +224,9 @@ def run_decide(
     except ServiceError as e:
         print(f"ERREUR : {e}")
         return 1
+    except ErpError as e:  # ERP vérifié avant la reprise : la décision n'est pas enregistrée
+        print(f"ERREUR : {nc_id} : {e}. La fiche reste en attente de validation.")
+        return 1
     if run.statut == "erreur":
         print(f"ERREUR : {run.nc_id} : {run.erreur}")
         return 1
@@ -230,6 +234,16 @@ def run_decide(
         print(f"{run.nc_id} : {run.statut} par {run.decided_by}, ticket créé : {run.ticket_id}")
     else:
         print(f"{run.nc_id} : {run.statut} par {run.decided_by}, aucun ticket créé")
+    return 0
+
+
+def run_retry(service: Service, nc_id: str) -> int:
+    try:
+        service.retry(nc_id)
+    except ServiceError as e:
+        print(f"ERREUR : {e}")
+        return 1
+    print(f"{nc_id} : sera traitée de nouveau au prochain run-inbox")
     return 0
 
 
@@ -262,6 +276,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
     p_decide.add_argument("--valide-par", required=True, help="nom du valideur")
     p_decide.add_argument("--commentaire")
     p_decide.add_argument("--erp-url", help="URL de l'API ERP (défaut : ERP_URL)")
+    p_retry = sub.add_parser("retry", help="rend une fiche en erreur traitable au prochain run-inbox")
+    p_retry.add_argument("nc_id")
     args = parser.parse_args(argv)
     if args.command == "process" and args.decision and not args.valide_par:
         parser.error("--decision exige --valide-par")
@@ -299,8 +315,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
             )
             return run_process(args.fiche, deps, decide)
 
-    if args.command in ("run-inbox", "pending", "decide"):
-        # pending et decide n'appellent ni le LLM ni la recherche : le retriever reste inutilisé.
+    if args.command in ("run-inbox", "pending", "decide", "retry"):
+        # pending, decide et retry n'appellent ni le LLM ni la recherche : le retriever reste inutilisé.
         llm = OllamaLLM(settings) if getattr(args, "llm", "none") == "ollama" else None
         with ErpClient(getattr(args, "erp_url", None) or settings.erp_url) as erp:
             deps = Deps(
@@ -314,6 +330,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
                     return run_inbox(service, args.inbox)
                 if args.command == "pending":
                     return print_pending(service)
+                if args.command == "retry":
+                    return run_retry(service, args.nc_id)
                 return run_decide(service, args.nc_id, args.decision, args.valide_par, args.action, args.commentaire)
 
     where = {"domaine": args.domaine} if args.domaine else None

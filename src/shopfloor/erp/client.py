@@ -84,6 +84,22 @@ class ErpClient:
             raise ErpConflictError(f"ticket déjà existant : {existing_id}", existing_id=existing_id)
         raise ErpError(f"création refusée ({resp.status_code}) : {self._detail(resp)}", resp.status_code)
 
+    def health(self) -> None:
+        """Vérifie que l'ERP répond (GET /health). Lève ErpUnavailableError s'il est injoignable."""
+        resp = self._request("GET", "/health")
+        if resp.status_code != 200:
+            raise ErpError(f"ERP en erreur ({resp.status_code}) : {self._detail(resp)}", resp.status_code)
+
+    def list_tickets(self) -> list[Ticket]:
+        """Tous les tickets, du plus ancien au plus récent."""
+        resp = self._request("GET", "/tickets")
+        if resp.status_code != 200:
+            raise ErpError(f"lecture impossible ({resp.status_code}) : {self._detail(resp)}", resp.status_code)
+        try:
+            return [Ticket.model_validate(t) for t in resp.json()]
+        except (ValueError, TypeError, ValidationError) as e:
+            raise ErpError(f"réponse ERP invalide : {e}", status_code=resp.status_code) from None
+
     def find_by_nc_id(self, nc_id: str) -> Ticket | None:
         """Ticket déjà créé pour cette fiche, ou None."""
         resp = self._request("GET", "/tickets", params={"nc_id": nc_id})

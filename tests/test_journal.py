@@ -79,6 +79,25 @@ def test_record_decision_statut_invalide(journal):
             journal.record_decision("NC-1", statut=statut, decided_by="Valideur")
 
 
+def test_delete_error_rend_la_fiche_traitable(journal):
+    journal.record_error(nc_id="NC-1", fichier="NC-1.md", erreur="ERP indisponible")
+    journal.delete_error("NC-1")
+    assert journal.get_run("NC-1") is None
+    pending(journal)  # le nc_id est de nouveau libre
+    assert journal.get_run("NC-1").statut == "en_attente"
+
+
+@pytest.mark.parametrize("statut", ["doublon", "en_attente", None])
+def test_delete_error_seulement_sur_une_fiche_en_erreur(journal, statut):
+    if statut == "doublon":
+        journal.record_error(nc_id="NC-1", fichier="NC-1.md", erreur="doublon", statut="doublon")
+    elif statut == "en_attente":
+        pending(journal)
+    with pytest.raises(JournalError, match="aucune fiche en erreur pour NC-1"):
+        journal.delete_error("NC-1")
+    assert (journal.get_run("NC-1") is None) == (statut is None)
+
+
 def test_list_runs_filtres(journal):
     pending(journal, "NC-1")
     pending(journal, "NC-2", site="Site Beta", procede="peinture", part_ref="PP-120", verdict="CONFORME",

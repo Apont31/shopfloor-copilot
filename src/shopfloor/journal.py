@@ -162,6 +162,13 @@ class Journal:
             raise JournalError(f"aucune fiche en attente pour {nc_id}")
         return self.get_run(nc_id)
 
+    def delete_error(self, nc_id: str) -> None:
+        """Efface la ligne d'une fiche en erreur : elle redeviendra traitable (relance)."""
+        with self.lock, self.conn:
+            cur = self.conn.execute("DELETE FROM runs WHERE nc_id = ? AND statut = 'erreur'", (nc_id,))
+        if cur.rowcount != 1:
+            raise JournalError(f"aucune fiche en erreur pour {nc_id}")
+
     def get_run(self, nc_id: str) -> Run | None:
         with self.lock:
             row = self.conn.execute("SELECT * FROM runs WHERE nc_id = ?", (nc_id,)).fetchone()
