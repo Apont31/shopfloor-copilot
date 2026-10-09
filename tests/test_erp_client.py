@@ -63,6 +63,18 @@ def test_payload_invalide_erp_error(erp):
         erp.create_ticket({"nc_id": "NC-X"})
 
 
+def test_find_by_nc_id(erp):
+    assert erp.find_by_nc_id("NC-2026-101") is None
+    created = erp.create_ticket(payload())
+    assert erp.find_by_nc_id(created.nc_id) == created
+    assert erp.find_by_nc_id("NC-INCONNUE") is None
+
+
+def test_find_by_nc_id_injoignable():
+    with pytest.raises(ErpUnavailableError):
+        ErpClient("http://127.0.0.1:9", timeout=0.5).find_by_nc_id("NC-2026-101")
+
+
 def test_api_injoignable():
     erp = ErpClient("http://127.0.0.1:9", timeout=0.5)
     with pytest.raises(ErpUnavailableError):

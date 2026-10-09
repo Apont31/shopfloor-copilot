@@ -103,6 +103,15 @@ def test_liste(client):
     assert [t["nc_id"] for t in resp.json()] == ["NC-A", "NC-B"]
 
 
+def test_liste_filtree_par_nc_id(client):
+    a = client.post("/tickets", json=payload(nc_id="NC-A")).json()
+    b = client.post("/tickets", json=payload(nc_id="NC-B")).json()
+    assert client.get("/tickets", params={"nc_id": "NC-B"}).json() == [b]
+    assert client.get("/tickets", params={"nc_id": "NC-A"}).json() == [a]
+    assert client.get("/tickets", params={"nc_id": "NC-INCONNUE"}).json() == []
+    assert client.get("/tickets").json() == [a, b]  # sans paramètre : inchangé
+
+
 def test_persistance(db_path):
     created = TestClient(create_app(db_path)).post("/tickets", json=payload()).json()
     other = TestClient(create_app(db_path))

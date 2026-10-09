@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from shopfloor import cli
 from shopfloor.corpus import read_document
+from shopfloor.errors import OllamaUnavailableError
 from shopfloor.rag.embeddings import FakeEmbedder
 from shopfloor.rag.ingest import COLLECTION, chunk_document, get_client, ingest, split_sections
 from shopfloor.rag.retriever import RetrievedChunk, make_retriever, retrieve_similar
@@ -204,3 +205,34 @@ def test_cli_ingest_puis_search(chroma_dir, monkeypatch, capsys):
 def test_cli_domaine_invalide(capsys):
     with pytest.raises(SystemExit):
         cli.main(["search", "x", "--domaine", "bois"], embedder=FakeEmbedder())
+
+
+# --- Étape 8a : ingest robuste ----------------------------------------------------------------------
+
+
+class EmbedderEnPanne:
+    """Embedder qui échoue comme un Ollama arrêté."""
+
+    def embed_documents(self, texts):
+        raise OllamaUnavailableError()
+
+    def embed_query(self, text):
+        raise OllamaUnavailableError()
+
+
+def test_embedder_en_echec_index_precedent_intact(indexed, chroma_dir):
+    n, _ = indexed
+    avant = search(chroma_dir, "porosité vide bâche", k=3)
+    with pytest.raises(OllamaUnavailableError):
+        ingest(EmbedderEnPanne(), DOCS, chroma_dir)
+    collection = get_client(chroma_dir).get_collection(COLLECTION, embedding_function=None)
+    assert collection.count() == n
+    assert search(chroma_dir, "porosité vide bâche", k=3) == avant
+
+
+def test_cli_ingest_embedder_en_echec_message_et_index_intact(indexed, chroma_dir, monkeypatch, capsys):
+    n, _ = indexed
+    monkeypatch.setenv("CHROMA_DIR", str(chroma_dir))
+    assert cli.main(["ingest"], embedder=EmbedderEnPanne()) == 1
+    assert "ERREUR : Ollama indisponible : lancez l'application Ollama" in capsys.readouterr().out
+    assert get_client(chroma_dir).get_collection(COLLECTION, embedding_function=None).count() == n

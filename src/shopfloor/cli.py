@@ -52,13 +52,26 @@ def _fmt(v) -> str:
     return "-" if v is None else str(v)
 
 
+# Affichage uniquement : le YAML, les modèles et l'oracle gardent les codes d'unité.
+UNITES_AFFICHEES = {"pct": "%", "um": "µm", "deg": "°", "degC": "°C"}
+
+
+def fmt_mesure(v, unite: str) -> str:
+    """Valeur suivie de son unité lisible : 2.8 pct -> « 2.8 % », 91.2 deg -> « 91.2° ». None -> « - »."""
+    if v is None:
+        return "-"
+    symbole = UNITES_AFFICHEES.get(unite, unite)
+    return f"{v}{symbole}" if symbole == "°" else f"{v} {symbole}"
+
+
 def _print_oracle(state: AgentState) -> None:
     oracle = state.oracle
     print(f"Fiche {oracle.nc_id} - pièce {state.nc.part_ref}, procédé {state.nc.procede}")
     print(f"Verdict de l'oracle : {oracle.verdict.value}")
     rows = [("Caractéristique", "Valeur", "Min", "Max", "Écart", "Statut")]
     rows += [
-        (d.caracteristique, f"{d.valeur} {d.unite}", _fmt(d.min), _fmt(d.max), _fmt(d.ecart), d.statut.value)
+        (d.caracteristique, fmt_mesure(d.valeur, d.unite), _fmt(d.min), _fmt(d.max), fmt_mesure(d.ecart, d.unite),
+         d.statut.value)
         for d in oracle.details
     ]
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]

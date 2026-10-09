@@ -1,8 +1,9 @@
 """Graphe LangGraph de l'agent (décision D3).
 
-parse_nc -> oracle -> [NON_CONFORME] retrieve_similar -> propose_action -> human_gate -> create_ticket
-                   -> [CONFORME, INDETERMINE] propose_default -> human_gate
-Une fiche illisible s'arrête après parse_nc ; un index RAG ou Ollama indisponible après retrieve_similar ;
+parse_nc -> check_existing -> oracle -> [NON_CONFORME] retrieve_similar -> propose_action -> human_gate
+                                     -> [CONFORME, INDETERMINE] propose_default -> human_gate
+human_gate -> [approve, edit] create_ticket
+Une fiche illisible s'arrête après parse_nc ; une fiche déjà traitée ou un ERP injoignable après check_existing ; un index RAG ou Ollama indisponible après retrieve_similar ;
 un rejet humain s'arrête après human_gate.
 """
 
@@ -24,6 +25,7 @@ __all__ = ["Deps", "build_graph", "thread_config", "initial_state", "start", "re
 # Champs que chaque nœud a le droit d'écrire. Seul le nœud oracle écrit « oracle ».
 WRITES: dict[str, frozenset[str]] = {
     "parse_nc": frozenset({"nc", "error"}),
+    "check_existing": frozenset({"error"}),
     "oracle": frozenset({"oracle"}),
     "retrieve_similar": frozenset({"similar", "passages", "error"}),
     "propose_action": frozenset({"proposal", "guard", "llm_calls"}),
@@ -49,6 +51,10 @@ def _bind(name: str, deps: Deps):
 
 
 def _after_parse(state: AgentState) -> str:
+    return END if state.error is not None else "check_existing"
+
+
+def _after_check_existing(state: AgentState) -> str:
     return END if state.error is not None else "oracle"
 
 
@@ -69,7 +75,8 @@ def build_graph(deps: Deps):
     for name in WRITES:
         builder.add_node(name, _bind(name, deps))
     builder.add_edge(START, "parse_nc")
-    builder.add_conditional_edges("parse_nc", _after_parse, ["oracle", END])
+    builder.add_conditional_edges("parse_nc", _after_parse, ["check_existing", END])
+    builder.add_conditional_edges("check_existing", _after_check_existing, ["oracle", END])
     builder.add_conditional_edges("oracle", _after_oracle, ["retrieve_similar", "propose_default"])
     builder.add_conditional_edges("retrieve_similar", _after_retrieve, ["propose_action", END])
     builder.add_edge("propose_action", "human_gate")

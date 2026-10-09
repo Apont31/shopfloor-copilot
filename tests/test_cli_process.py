@@ -1,6 +1,7 @@
 """Sous-commande process : run_process avec FakeLLM, FakeEmbedder (index dans tmp_path) et ERP TestClient."""
 
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,7 @@ def test_approve_ticket_cree(chroma_dir, erp_http, capsys):
     assert f"Ticket créé : {ticket['id']}" in out
     # Affichage : verdict, tableau des mesures, documents similaires, proposition, durée LLM.
     assert "Verdict de l'oracle : NON_CONFORME" in out
-    assert "porosite" in out and "2.8 pct" in out and "2.0" in out and "0.8" in out
+    assert "porosite" in out and "2.8 %" in out and "2.0" in out and "0.8 %" in out
     assert out.count("score=") == 3
     assert "Proposition (origine : llm)" in out
     assert "ALERTE" not in out
@@ -82,7 +83,23 @@ def test_erp_injoignable_code_1_message_clair(chroma_dir, capsys):
     out = capsys.readouterr().out
     assert code == 1
     assert "ERREUR : ERP indisponible : serveur injoignable à http://127.0.0.1:9" in out
-    assert "Ticket créé" not in out
+    assert "Ticket créé" not in out and "Verdict de l'oracle" not in out
+
+
+def test_doublon_code_1_sans_llm_ni_decision(chroma_dir, erp_http, capsys):
+    erp = ErpClient("http://testserver", http_client=erp_http)
+    assert cli.run_process(NC_101, deps(chroma_dir, erp, llm_ok()), lambda p: APPROVE) == 0
+    [ticket] = erp_http.get("/tickets").json()
+    capsys.readouterr()
+    llm = FakeLLM()
+
+    def decide(payload):
+        raise AssertionError("aucune décision ne doit être demandée")
+
+    assert cli.run_process(NC_101, deps(chroma_dir, erp, llm), decide) == 1
+    out = capsys.readouterr().out
+    assert f"ERREUR : Ticket déjà existant pour NC-2026-101 : {ticket['id']}" in out
+    assert llm.n_calls == 0 and "Appel LLM" not in out
 
 
 def test_rejet_aucun_ticket_code_0(chroma_dir, erp_http, capsys):
@@ -171,8 +188,9 @@ def test_cli_process_sans_llm_erp_injoignable(chroma_dir, monkeypatch, capsys):
     )
     out = capsys.readouterr().out
     assert code == 1
-    assert "Proposition (origine : deterministe)" in out and "aucun LLM configuré" in out
-    assert "ERP indisponible" in out
+    # Étape 8a : arrêt dès check_existing, avant l'oracle et toute proposition.
+    assert "Verdict de l'oracle" not in out and "Proposition" not in out
+    assert "ERREUR : ERP indisponible : serveur injoignable à http://127.0.0.1:9" in out
 
 
 def test_cli_decision_exige_valide_par(capsys):
@@ -222,3 +240,28 @@ def test_cli_search_collection_absente(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "vide"))
     assert cli.main(["search", "porosité"], embedder=FakeEmbedder()) == 1
     assert "ERREUR : Index RAG indisponible : lancez python -m shopfloor.cli ingest" in capsys.readouterr().out
+
+
+# --- Étape 8a : affichage des unités -------------------------------------------------------------------
+
+@pytest.mark.parametrize("valeur, unite, attendu", [
+    (Decimal("2.8"), "pct", "2.8 %"),
+    (Decimal("12"), "um", "12 µm"),
+    (Decimal("91.2"), "deg", "91.2°"),
+    (Decimal("180"), "degC", "180 °C"),
+    (Decimal("3.20"), "mm", "3.20 mm"),  # autres codes : tels quels
+    (Decimal("85"), "GU", "85 GU"),
+    (Decimal("1"), "classe", "1 classe"),
+    (Decimal("-0.15"), "mm", "-0.15 mm"),
+    (None, "pct", "-"),
+])
+def test_fmt_mesure(valeur, unite, attendu):
+    assert cli.fmt_mesure(valeur, unite) == attendu
+
+
+def test_tableau_oracle_ecart_avec_unite(chroma_dir, erp_http, capsys):
+    erp = ErpClient("http://testserver", http_client=erp_http)
+    cli.run_process(NC_101, deps(chroma_dir, erp, llm_ok()), lambda p: REJECT)
+    [ligne] = [l for l in capsys.readouterr().out.splitlines() if l.strip().startswith("porosite")]
+    assert ligne.split() == ["porosite", "2.8", "%", "-", "2.0", "0.8", "%", "NON_CONFORME"]
+    assert "pct" not in ligne

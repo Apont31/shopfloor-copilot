@@ -78,10 +78,15 @@ def ingest(
     docs_dir: str | Path = DOCS_DIR,
     chroma_dir: str | Path | None = None,
 ) -> int:
-    """Recrée la collection et indexe tous les documents. Renvoie le nombre de chunks."""
+    """Recrée la collection et indexe tous les documents. Renvoie le nombre de chunks.
+
+    Les embeddings sont calculés avant de toucher à la collection : si l'embedder échoue
+    (Ollama indisponible…), l'exception remonte et l'index existant reste intact.
+    """
     chunks = [c for p in sorted(Path(docs_dir).glob("*.md")) for c in chunk_document(p)]
     if not chunks:
         raise ValueError(f"aucun document dans {docs_dir}")
+    embeddings = embedder.embed_documents([c.text for c in chunks])
     client = get_client(chroma_dir)
     try:
         client.delete_collection(COLLECTION)
@@ -96,6 +101,6 @@ def ingest(
         ids=[c.id for c in chunks],
         documents=[c.text for c in chunks],
         metadatas=[c.metadata for c in chunks],
-        embeddings=embedder.embed_documents([c.text for c in chunks]),
+        embeddings=embeddings,
     )
     return len(chunks)

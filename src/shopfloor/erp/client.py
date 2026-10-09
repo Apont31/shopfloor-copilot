@@ -84,6 +84,17 @@ class ErpClient:
             raise ErpConflictError(f"ticket déjà existant : {existing_id}", existing_id=existing_id)
         raise ErpError(f"création refusée ({resp.status_code}) : {self._detail(resp)}", resp.status_code)
 
+    def find_by_nc_id(self, nc_id: str) -> Ticket | None:
+        """Ticket déjà créé pour cette fiche, ou None."""
+        resp = self._request("GET", "/tickets", params={"nc_id": nc_id})
+        if resp.status_code != 200:
+            raise ErpError(f"recherche impossible ({resp.status_code}) : {self._detail(resp)}", resp.status_code)
+        try:
+            tickets = [Ticket.model_validate(t) for t in resp.json()]
+        except (ValueError, TypeError, ValidationError) as e:
+            raise ErpError(f"réponse ERP invalide : {e}", status_code=resp.status_code) from None
+        return next((t for t in tickets if t.nc_id == nc_id), None)
+
     def get_ticket(self, ticket_id: str) -> Ticket:
         resp = self._request("GET", f"/tickets/{ticket_id}")
         if resp.status_code == 200:

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from shopfloor.agent import nodes
 from shopfloor.agent.fallback import default_proposal
-from shopfloor.agent.graph import Deps, build_graph, get_state, resume, start
+from shopfloor.agent.graph import WRITES, Deps, build_graph, get_state, resume, start
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.config import Settings
 from shopfloor.erp.api import create_app
@@ -283,25 +283,50 @@ def test_13_injection_sans_effet(erp, tmp_path):
     assert ticket["verdict"] == "NON_CONFORME"
 
 
-# 14. ERP injoignable -> erreur dans l'état, pas d'exception.
+# 14. ERP injoignable -> erreur dans l'état, pas d'exception, arrêt avant l'oracle (étape 8a).
 def test_14_erp_indisponible(erp):
     erp.client = ErpClient("http://127.0.0.1:9", timeout=0.5)
-    state = run(make_graph(erp, FakeLLM(proposal_json())), NC_101, APPROVE)
+    llm = FakeLLM()
+    graph = make_graph(erp, llm)
+    state = run(graph, NC_101)
     assert state.error == "ERP indisponible"
-    assert state.ticket is None
+    assert state.nc is not None and state.oracle is None
+    assert state.proposal is None and state.ticket is None
+    assert llm.n_calls == 0 and state.llm_calls == 0
+    assert pending(graph, "NC-2026-101") == ((), [])
 
 
-# 15. Même fiche traitée deux fois -> erreur avec l'id du ticket existant.
+# 15. Même fiche traitée deux fois -> doublon détecté tôt par check_existing (étape 8a).
 def test_15_meme_fiche_deux_fois(erp):
-    llm = FakeLLM(proposal_json(), proposal_json())
+    llm = FakeLLM(proposal_json())
     graph = make_graph(erp, llm)
     first = run(graph, NC_101, APPROVE)
-    second = run(graph, NC_101, APPROVE)
+    second = run(graph, NC_101)
     assert first.ticket is not None and first.error is None
     assert second.ticket is None  # l'état du premier passage n'est pas repris
-    assert second.error == f"ticket déjà existant pour NC-2026-101 : {first.ticket.id}"
-    assert second.llm_calls == 1 and llm.n_calls == 2
+    assert second.error == f"Ticket déjà existant pour NC-2026-101 : {first.ticket.id}"
+    # Aucun appel LLM, aucune interruption, verdict non recalculé.
+    assert second.llm_calls == 0 and llm.n_calls == 1
+    assert second.oracle is None and second.proposal is None
+    assert pending(graph, "NC-2026-101") == ((), [])
     assert len(erp.tickets()) == 1
+
+
+# 15b. Deux traitements simultanés : check_existing ne voit rien, create_ticket reçoit le 409.
+def test_15b_conflit_409_toujours_gere(erp):
+    class ErpSansRecherche(ErpClient):
+        def find_by_nc_id(self, nc_id):
+            return None
+
+    erp.client = ErpSansRecherche("http://testserver", http_client=erp.http)
+    first = run(make_graph(erp, FakeLLM(proposal_json())), NC_101, APPROVE)
+    second = run(make_graph(erp, FakeLLM(proposal_json())), NC_101, APPROVE)
+    assert second.error == f"ticket déjà existant pour NC-2026-101 : {first.ticket.id}"
+    assert second.llm_calls == 1 and len(erp.tickets()) == 1
+
+
+def test_check_existing_n_ecrit_que_error():
+    assert WRITES["check_existing"] == frozenset({"error"})
 
 
 # --- Compléments : unités du graphe ---------------------------------------------------------------

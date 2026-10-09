@@ -48,6 +48,23 @@ def parse_nc(state: AgentState, deps: Deps) -> dict:
         return {"error": f"fiche illisible : {e}"}
 
 
+def check_existing(state: AgentState, deps: Deps) -> dict:
+    """Arrête tôt une fiche déjà traitée : avant l'oracle, le LLM et la validation humaine.
+
+    create_ticket garde sa gestion du 409 pour deux traitements simultanés de la même fiche.
+    """
+    nc_id = state.nc.nc_id
+    try:
+        existing = deps.erp.find_by_nc_id(nc_id)
+    except ErpUnavailableError:
+        return {"error": "ERP indisponible"}
+    except ErpError as e:
+        return {"error": f"erreur ERP : {e}"}
+    if existing is not None:
+        return {"error": f"Ticket déjà existant pour {nc_id} : {existing.id}"}
+    return {}
+
+
 def oracle(state: AgentState, deps: Deps) -> dict:
     return {"oracle": check_conformity(state.nc, deps.tolerances)}
 

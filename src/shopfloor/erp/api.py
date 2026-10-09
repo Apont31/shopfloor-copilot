@@ -53,9 +53,13 @@ def create_app(db_path: str | Path) -> FastAPI:
         return ticket
 
     @app.get("/tickets", response_model=list[Ticket])
-    def list_tickets():
+    def list_tickets(nc_id: str | None = None):
+        """Tous les tickets ; avec ?nc_id=, le ticket de cette fiche (liste de 0 ou 1 élément)."""
         ensure_db()
-        return db.list_tickets(db_path)
+        if nc_id is None:
+            return db.list_tickets(db_path)
+        ticket = db.get_ticket_by_nc_id(db_path, nc_id)
+        return [ticket] if ticket is not None else []
 
     return app
 
