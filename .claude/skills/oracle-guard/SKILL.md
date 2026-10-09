@@ -8,9 +8,9 @@ description: À utiliser dès que tu modifies l'oracle de conformité, tolerance
 Règle centrale du projet : l'oracle (code pur, tolérances dans tolerances.yaml) décide de la conformité. Le LLM explique et rédige, il ne tranche jamais.
 
 ## Contraintes sur l'oracle
-- `check_conformity` est une fonction pure : aucune dépendance au LLM, au réseau ni à l'horloge.
+- `check_conformity(nc: NCRecord, tolerances: ToleranceTable) -> OracleResult` est une fonction pure : aucune dépendance au LLM, au réseau ni à l'horloge.
 - Les tolérances viennent uniquement de tolerances.yaml, jamais codées en dur ailleurs.
-- Le verdict est structuré : conforme ou non, mesure, tolérance, écart.
+- Le verdict a 3 états : CONFORME / NON_CONFORME / INDETERMINE. Il est structuré : statut, mesure, tolérance, écart.
 - Tests obligatoires : cas conforme, cas non conforme, valeurs exactement sur les bornes, donnée manquante ou invalide.
 
 ## Contraintes sur l'agent
