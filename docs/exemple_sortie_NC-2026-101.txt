@@ -1,0 +1,27 @@
+# Sortie réelle de la CLI pour NC-2026-101 (étape 8b, 2026-10-10).
+# LLM : qwen2.5:7b-instruct via Ollama, RTX 4060. Embeddings : nomic-embed-text.
+# ERP en mémoire (TestClient, base SQLite temporaire). Décision humaine : approve.
+# Équivalent : python -m shopfloor.cli process data/nc_inbox/NC-2026-101.md --valide-par "Chef d'atelier fictif" --decision approve
+# Texte du LLM non retouché. Note : « op. 50 » est l'opération de GAMME-CP210 (qui renvoie à PROC-COMP-01) ;
+# c'est le type d'imprécision que la validation humaine doit relever.
+
+Fiche NC-2026-101 - pièce CP-210, procédé composite
+Verdict de l'oracle : NON_CONFORME
+  Caractéristique  Valeur  Min  Max  Écart  Statut
+  porosite         2.8 %   -    2.0  0.8 %  NON_CONFORME
+
+Documents similaires :
+  NC-2025-014   score=0.883  (Description)
+  PROC-COMP-01  score=0.792  (Contrôle final)
+  GAMME-CP210   score=0.744  (Présentation)
+
+Proposition (origine : llm)
+  Résumé             : Porosité excessive sur un panneau carbone CP-210, avec un débit de vide plus long que d'habitude avant la cuisson.
+  Cause probable     : Fuite de la bâche à vide, comme sur la NC historique NC-2025-014, ce qui a permis à l'air d'entrer pendant la cuisson et a créé des porosités.
+  Action corrective  : 1. Effectuer un test d'étanchéité de la bâche à vide avant chaque cuisson, en suivant la procédure de l'op. 50 de PROC-COMP-01. 2. Contrôler la bâche à vide à chaque prise de poste et la remplacer si elle est déformée ou présente des fuites. 3. Effectuer un contrôle ultrasons renforcé sur les 3 lots suivants, comme après la NC historique.
+  Décision suggérée  : rebut
+  Sources            : NC-2025-014, PROC-COMP-01
+
+Appel LLM : 13.8 s (1 appel(s) : 13.8 s)
+
+Ticket créé : TCK-0001
