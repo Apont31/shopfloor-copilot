@@ -81,6 +81,30 @@ def test_affirmation_de_conformite_rejetee(text):
         assert any(champ in m and "conformité" in m for m in result.motifs)
 
 
+@pytest.mark.parametrize("text", [
+    "La pièce n'est pas conforme.",
+    "La pièce n'est toujours pas conforme.",
+    "Le panneau n'a jamais été conforme sur ce lot.",
+    "Pas réellement conforme.",
+])
+def test_negation_dans_les_3_mots_precedents_acceptee(text):
+    assert not affirme_conformite(text)
+    assert check_proposal(proposal(cause_probable=text), NON_CONFORME, RETRIEVED).ok
+
+
+@pytest.mark.parametrize("text", [
+    "Elle est conforme.",
+    "Pas de doute, elle est conforme.",  # « pas » est à 4 mots de « conforme »
+    "Jamais vu un tel écart, mais pièce conforme.",
+    "Pas sûr : est conforme.",  # « est conforme » toujours rejeté, même avec une négation proche
+    "Pas dans les tolérances du plan ? Si.",
+    "Non, pièce en tolérance.",
+])
+def test_affirmation_rejetee_malgre_une_negation_eloignee_ou_hors_fenetre(text):
+    assert affirme_conformite(text)
+    assert not check_proposal(proposal(resume=text), NON_CONFORME, RETRIEVED).ok
+
+
 def test_conformite_non_controlee_hors_non_conforme():
     """Le contrôle (b) ne s'applique qu'à un verdict NON_CONFORME."""
     p = proposal(resume="Toutes les mesures sont conformes.", sources=[])

@@ -21,12 +21,16 @@ class GuardResult(BaseModel):
 
 
 # Appliqués à un texte normalisé : minuscules, sans accents, tirets unifiés, espaces simples.
-# « conforme(s) » non précédé de « non » ou « non- » ; « non_conforme » (sans frontière de mot) est ignoré.
-_AFFIRME_CONFORMITE = (
-    re.compile(r"(?<!\bnon )(?<!\bnon-)\bconformes?\b"),
+# Rejetés même en présence d'une négation proche.
+_TOUJOURS_REJETES = (
+    re.compile(r"\best conformes?\b"),
     re.compile(r"\bdans (la|les) tolerances?\b"),
     re.compile(r"\ben tolerances?\b"),
 )
+# « conforme(s) » est accepté si l'un de ces mots figure parmi les 3 mots qui précèdent.
+# Mots = suites de \w : « non-conforme » donne « non », « conforme » ; « non_conforme » reste un seul mot.
+_NEGATIONS = frozenset({"non", "pas", "jamais"})
+_FENETRE_NEGATION = 3
 _TIRETS = dict.fromkeys(map(ord, "‐‑‒–—−"), "-")
 
 
@@ -37,9 +41,18 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def _conforme_sans_negation(norm: str) -> bool:
+    mots = re.findall(r"\w+", norm)
+    return any(
+        mot in ("conforme", "conformes")
+        and not _NEGATIONS.intersection(mots[max(0, i - _FENETRE_NEGATION):i])
+        for i, mot in enumerate(mots)
+    )
+
+
 def affirme_conformite(text: str) -> bool:
     norm = _normalize(text)
-    return any(p.search(norm) for p in _AFFIRME_CONFORMITE)
+    return any(p.search(norm) for p in _TOUJOURS_REJETES) or _conforme_sans_negation(norm)
 
 
 def check_proposal(

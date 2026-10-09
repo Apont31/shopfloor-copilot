@@ -1,5 +1,6 @@
 """Recherche de passages similaires dans la collection ChromaDB."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -48,3 +49,16 @@ def retrieve_similar(
         )
         for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0])
     ]
+
+
+def make_retriever(
+    chroma_dir: str | Path, embedder: Embedder, k: int = 8
+) -> Callable[[str, dict | None], list[RetrievedChunk]]:
+    """Retriever de production pour l'agent : (query, where) -> passages. Les erreurs remontent à l'appelant."""
+    if k < 1:
+        raise ValueError("k doit être >= 1")
+
+    def retriever(query: str, where: dict | None) -> list[RetrievedChunk]:
+        return retrieve_similar(query, k=k, where=where, embedder=embedder, chroma_dir=chroma_dir)
+
+    return retriever

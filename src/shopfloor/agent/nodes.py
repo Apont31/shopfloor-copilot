@@ -26,6 +26,7 @@ Retriever = Callable[[str, dict | None], list[RetrievedChunk]]
 
 SIMILAR_DOCS = 3
 MAX_LLM_CALLS = 2  # D5 : un appel, une relance au maximum
+RAG_INDISPONIBLE = "Index RAG indisponible : lancez python -m shopfloor.cli ingest"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -57,7 +58,11 @@ def build_query(nc: NCRecord, oracle_result: OracleResult) -> str:
 
 
 def retrieve_similar(state: AgentState, deps: Deps) -> dict:
-    chunks = deps.retriever(build_query(state.nc, state.oracle), {"domaine": state.nc.procede})
+    where = {"domaine": {"$in": [state.nc.procede, "qualite"]}}
+    try:
+        chunks = deps.retriever(build_query(state.nc, state.oracle), where)
+    except Exception:  # index absent, Chroma ou embedder indisponible : on arrête proprement
+        return {"error": RAG_INDISPONIBLE}
     best: dict[str, RetrievedChunk] = {}
     for c in chunks:
         if c.doc_id not in best or c.score > best[c.doc_id].score:

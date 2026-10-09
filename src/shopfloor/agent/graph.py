@@ -2,7 +2,8 @@
 
 parse_nc -> oracle -> [NON_CONFORME] retrieve_similar -> propose_action -> human_gate -> create_ticket
                    -> [CONFORME, INDETERMINE] propose_default -> human_gate
-Une fiche illisible s'arrête après parse_nc ; un rejet humain s'arrête après human_gate.
+Une fiche illisible s'arrête après parse_nc ; un index RAG indisponible après retrieve_similar ;
+un rejet humain s'arrête après human_gate.
 """
 
 from pathlib import Path
@@ -24,7 +25,7 @@ __all__ = ["Deps", "build_graph", "thread_config", "initial_state", "start", "re
 WRITES: dict[str, frozenset[str]] = {
     "parse_nc": frozenset({"nc", "error"}),
     "oracle": frozenset({"oracle"}),
-    "retrieve_similar": frozenset({"similar"}),
+    "retrieve_similar": frozenset({"similar", "error"}),
     "propose_action": frozenset({"proposal", "guard", "llm_calls"}),
     "propose_default": frozenset({"proposal"}),
     "human_gate": frozenset({"human"}),
@@ -55,6 +56,10 @@ def _after_oracle(state: AgentState) -> str:
     return "retrieve_similar" if state.oracle.verdict == Verdict.NON_CONFORME else "propose_default"
 
 
+def _after_retrieve(state: AgentState) -> str:
+    return END if state.error is not None else "propose_action"
+
+
 def _after_human(state: AgentState) -> str:
     return "create_ticket" if state.human.decision in ("approve", "edit") else END
 
@@ -66,7 +71,7 @@ def build_graph(deps: Deps):
     builder.add_edge(START, "parse_nc")
     builder.add_conditional_edges("parse_nc", _after_parse, ["oracle", END])
     builder.add_conditional_edges("oracle", _after_oracle, ["retrieve_similar", "propose_default"])
-    builder.add_edge("retrieve_similar", "propose_action")
+    builder.add_conditional_edges("retrieve_similar", _after_retrieve, ["propose_action", END])
     builder.add_edge("propose_action", "human_gate")
     builder.add_edge("propose_default", "human_gate")
     builder.add_conditional_edges("human_gate", _after_human, ["create_ticket", END])

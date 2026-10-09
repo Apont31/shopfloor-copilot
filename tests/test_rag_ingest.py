@@ -8,7 +8,7 @@ from shopfloor import cli
 from shopfloor.corpus import read_document
 from shopfloor.rag.embeddings import FakeEmbedder
 from shopfloor.rag.ingest import COLLECTION, chunk_document, get_client, ingest, split_sections
-from shopfloor.rag.retriever import RetrievedChunk, retrieve_similar
+from shopfloor.rag.retriever import RetrievedChunk, make_retriever, retrieve_similar
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "data" / "docs"
@@ -150,6 +150,29 @@ def test_retrieved_chunk_immuable(indexed, chroma_dir):
     assert isinstance(r, RetrievedChunk)
     with pytest.raises(ValidationError):
         r.score = 0.0
+
+
+# --- make_retriever -----------------------------------------------------------------
+
+
+def test_make_retriever_filtre_in_et_k(indexed, chroma_dir):
+    retriever = make_retriever(chroma_dir, FakeEmbedder())
+    results = retriever("porosité vide bâche", {"domaine": {"$in": ["composite", "qualite"]}})
+    assert len(results) == 8
+    assert {r.domaine for r in results} <= {"composite", "qualite"}
+    assert results == retriever("porosité vide bâche", {"domaine": {"$in": ["composite", "qualite"]}})
+    assert len(make_retriever(chroma_dir, FakeEmbedder(), k=2)("porosité", None)) == 2
+
+
+def test_make_retriever_k_invalide(chroma_dir):
+    with pytest.raises(ValueError):
+        make_retriever(chroma_dir, FakeEmbedder(), k=0)
+
+
+def test_make_retriever_index_absent_leve(tmp_path):
+    retriever = make_retriever(tmp_path / "vide", FakeEmbedder())
+    with pytest.raises(Exception):
+        retriever("porosité", None)
 
 
 # --- FakeEmbedder ----------------------------------------------------------------

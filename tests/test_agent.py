@@ -20,6 +20,8 @@ from shopfloor.models import Verdict
 from shopfloor.nc import parse_nc_file
 from shopfloor.oracle.conformity import check_conformity
 from shopfloor.oracle.loader import load_tolerances
+from shopfloor.rag.embeddings import FakeEmbedder
+from shopfloor.rag.retriever import make_retriever
 
 ROOT = Path(__file__).resolve().parents[1]
 INBOX = ROOT / "data" / "nc_inbox"
@@ -324,11 +326,25 @@ def test_retrieve_similar_requete_filtre_et_regroupement(erp):
     graph = make_graph(erp, FakeLLM(proposal_json()), retriever)
     state = run(graph, NC_101)
     [(query, where)] = seen
-    assert where == {"domaine": "composite"}
+    assert where == {"domaine": {"$in": ["composite", "qualite"]}}
     assert query.startswith("CP-210 porosite 2.8 pct")
     assert "vide a mis plus de temps" in query
     assert [c.doc_id for c in state.similar] == ["NC-2025-014", "PROC-COMP-01", "PROC-QUA-01"]
     assert state.similar[0].score == 0.82  # meilleur passage du document
+
+
+def test_index_rag_indisponible_arret_propre(erp, tmp_path):
+    """Retriever en erreur (ici : aucune collection) -> message d'action, fin du graphe, aucun appel LLM."""
+    llm = FakeLLM()
+    retriever = make_retriever(tmp_path / "chroma_vide", FakeEmbedder())
+    graph = make_graph(erp, llm, retriever)
+    config = start(graph, NC_101)
+    state = get_state(graph, config)
+    assert state.error == "Index RAG indisponible : lancez python -m shopfloor.cli ingest"
+    assert state.oracle.verdict == Verdict.NON_CONFORME
+    assert state.proposal is None and llm.n_calls == 0
+    assert pending(graph, "NC-2026-101") == ((), [])
+    assert erp.tickets() == []
 
 
 def test_seul_le_noeud_oracle_ecrit_le_verdict(erp, monkeypatch):
