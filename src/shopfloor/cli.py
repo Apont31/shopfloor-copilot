@@ -7,6 +7,7 @@ python -m shopfloor.cli run-inbox [--llm ollama|none] [--erp-url URL] [--inbox D
 python -m shopfloor.cli pending
 python -m shopfloor.cli decide <nc_id> approve|reject|edit [--action "..."] --valide-par NOM [--commentaire "..."]
 python -m shopfloor.cli retry <nc_id>
+python -m shopfloor.cli reset [--yes]
 """
 
 import argparse
@@ -238,6 +239,65 @@ def run_retry(service: Service, nc_id: str) -> int:
     return 0
 
 
+# --- reset : logique testable ---------------------------------------------------------------------
+
+FICHIERS_VERROUILLES = "Fermez l'interface et le serveur ERP, puis relancez reset"
+
+
+def reset_targets(settings: Settings) -> list[Path]:
+    """Bases ERP, journal et état, avec leurs fichiers -wal et -shm. Jamais l'index RAG ni data/."""
+    return [Path(base + suffixe) for base in (settings.erp_db, settings.journal_db, settings.state_db)
+            for suffixe in ("", "-wal", "-shm")]
+
+
+def _protege(path: Path, settings: Settings) -> bool:
+    cible = path.resolve()
+    return any(cible.is_relative_to(Path(p).resolve()) for p in (settings.chroma_dir, ROOT / "data"))
+
+
+def run_reset(settings: Settings, yes: bool = False, input_fn=None) -> int:
+    """Supprime les bases locales après confirmation. Code 1 si refus, chemin protégé ou fichier verrouillé."""
+    cibles = reset_targets(settings)
+    proteges = [p for p in cibles if _protege(p, settings)]
+    if proteges:
+        print(f"ERREUR : chemin protégé (index RAG ou data/), reset refusé : {', '.join(map(str, proteges))}")
+        return 1
+    presents = [p for p in cibles if p.exists()]
+    if not presents:
+        print("Rien à supprimer : aucune base locale trouvée.")
+        return 0
+    print("Fichiers à supprimer :")
+    for p in presents:
+        print(f"  {p}")
+    if not yes:
+        try:
+            reponse = (input_fn or input)("Confirmer la suppression ? [o/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            reponse = ""
+        if reponse not in ("o", "oui"):
+            print("Annulé : aucun fichier supprimé.")
+            return 1
+    supprimes = []
+    code = 0
+    for p in presents:
+        try:
+            p.unlink(missing_ok=True)
+        except PermissionError:
+            print(f"ERREUR : {p} est verrouillé. {FICHIERS_VERROUILLES}.")
+            code = 1
+            break
+        except OSError as e:
+            print(f"ERREUR : impossible de supprimer {p} : {e}")
+            code = 1
+            break
+        supprimes.append(p)
+    print(f"{len(supprimes)} fichier(s) supprimé(s)" + (" :" if supprimes else "."))
+    for p in supprimes:
+        print(f"  {p}")
+    return code
+
+
 # --- CLI : couche fine ----------------------------------------------------------------------------
 
 
@@ -269,6 +329,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
     p_decide.add_argument("--erp-url", help="URL de l'API ERP (défaut : ERP_URL)")
     p_retry = sub.add_parser("retry", help="rend une fiche en erreur traitable au prochain run-inbox")
     p_retry.add_argument("nc_id")
+    p_reset = sub.add_parser("reset", help="supprime les bases ERP, journal et état (jamais l'index RAG ni data/)")
+    p_reset.add_argument("--yes", action="store_true", help="sans demande de confirmation")
     args = parser.parse_args(argv)
     if args.command == "process" and args.decision and not args.valide_par:
         parser.error("--decision exige --valide-par")
@@ -276,6 +338,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
         parser.error("--action est obligatoire avec edit, et seulement avec edit")
 
     settings = Settings()
+    if args.command == "reset":
+        return run_reset(settings, yes=args.yes)
     embedder = embedder or OllamaEmbedder(settings)
     if args.command == "ingest":
         try:

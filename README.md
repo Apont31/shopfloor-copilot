@@ -1,5 +1,7 @@
 # ShopFloor Copilot
 
+[![CI](https://github.com/Apont31/shopfloor-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Apont31/shopfloor-copilot/actions/workflows/ci.yml)
+
 **Le problème.** En atelier, les fiches de non-conformité (NC) sont traitées à la main. Le savoir utile est dispersé entre les procédures et les anciennes NC.
 
 **La solution.** Un copilote 100 % local vérifie la conformité, retrouve les cas similaires, propose une action corrective, puis crée le ticket ERP après validation humaine.
@@ -120,13 +122,20 @@ python -m shopfloor.cli decide NC-2026-103 edit --action "..." --valide-par "Nom
 python -m shopfloor.cli retry <nc_id>                 # remet une fiche en erreur dans le prochain run-inbox
 ```
 
+Repartir de bases vides (ERP, journal, file de validation), après avoir fermé l'interface et le serveur ERP. L'index RAG et `data/` ne sont jamais touchés :
+
+```bash
+python -m shopfloor.cli reset                         # demande confirmation ; --yes pour s'en passer
+```
+
 Script de démo de 2 minutes : [docs/DEMO.md](docs/DEMO.md).
 
 ## Qualité
 
-- 617 tests : 603 sans LLM (`pytest -m "not llm"`) et 14 avec le vrai Ollama (`pytest -m llm`).
+- 630 tests : 616 sans LLM (`pytest -m "not llm"`) et 14 avec le vrai Ollama (`pytest -m llm`).
 - Bornes de l'oracle testées aux valeurs limites. Mutations manuelles des comparaisons (`>` en `>=`, `<` en `<=`, borne supprimée) : toutes détectées.
 - Évaluation du retrieval : hit@3 = 5/5.
+- CI GitHub Actions sur Ubuntu et Windows, Python 3.12 : tests sans LLM à chaque push sur main et à chaque pull request.
 
 ## Ce que ce projet démontre
 
@@ -143,7 +152,6 @@ Script de démo de 2 minutes : [docs/DEMO.md](docs/DEMO.md).
 
 ## Roadmap
 
-- CI (GitHub Actions).
 - Images Docker publiées par CD.
 - Assistant questions-réponses sur les procédures.
 - API d'entrée des fiches.
@@ -175,7 +183,7 @@ src/shopfloor/
   ui/                    interface Streamlit
   service.py             boîte de réception et file de validation
   journal.py, kpis.py    journal des traitements et indicateurs du Pilotage
-  cli.py                 commandes ingest, search, process, run-inbox, pending, decide, retry
+  cli.py                 commandes ingest, search, process, run-inbox, pending, decide, retry, reset
 tests/                   pytest, faux LLM déterministe
 ```
 

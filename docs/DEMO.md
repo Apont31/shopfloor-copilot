@@ -5,9 +5,8 @@ Trois terminaux, environnement Python activé : **T1** serveur ERP, **T2** inter
 ## Préparation (hors caméra)
 
 ```bash
-# T3 : bases vides (interface arrêtée, sinon Windows verrouille les fichiers)
-rm -f erp.db shopfloor_state.db* shopfloor_journal.db*
-# PowerShell : Remove-Item erp.db, shopfloor_state.db*, shopfloor_journal.db* -ErrorAction SilentlyContinue
+# T3 : bases vides (interface et serveur ERP arrêtés, sinon Windows verrouille les fichiers)
+python -m shopfloor.cli reset --yes
 python -m shopfloor.cli ingest
 
 # T1 : serveur ERP
