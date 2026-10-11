@@ -197,3 +197,15 @@ def decision_message(run: Run) -> tuple[str, str]:
     if run.ticket_id is not None:
         return "success", f"{run.nc_id} {LIBELLES_STATUT[run.statut]} : ticket {run.ticket_id} créé"
     return "info", f"{run.nc_id} rejetée : aucun ticket créé"
+
+
+LIBELLES_DECISION_COURTS = {"approuve": "Approuvée", "modifie": "Modifiée", "rejete": "Rejetée"}
+
+
+def ligne_decision(run: Run) -> tuple[str, str]:
+    """(niveau, ligne compacte) qui remplace la carte après une décision : « NC-1 — Approuvée — ticket TCK-0001 »."""
+    if run.statut == "erreur":
+        return "error", f"{run.nc_id} — Ticket non créé — {run.erreur}. La fiche passe dans « En erreur »."
+    libelle = LIBELLES_DECISION_COURTS.get(run.statut, LIBELLES_STATUT.get(run.statut, run.statut))
+    suite = f"ticket {run.ticket_id}" if run.ticket_id is not None else "aucun ticket"
+    return ("success" if run.ticket_id is not None else "info"), f"{run.nc_id} — {libelle} — {suite}"

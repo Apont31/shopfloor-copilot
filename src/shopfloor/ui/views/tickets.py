@@ -1,4 +1,7 @@
-"""Page « Tickets ERP » : tickets créés dans la fausse API ERP (GET /tickets)."""
+"""Page « Tickets ERP » : tickets créés dans la fausse API ERP (GET /tickets).
+
+Liste gardée TICKETS_TTL_S secondes dans la session, relue aussitôt après une décision prise dans la session.
+"""
 
 import streamlit as st
 
@@ -7,13 +10,14 @@ from shopfloor.errors import ERP_INDISPONIBLE
 from shopfloor.ui import deps
 from shopfloor.ui.format import LARGEURS_TICKETS, ticket_rows
 
+TICKETS_TTL_S = 10.0  # tickets créés par une autre session : visibles au plus tard après ce délai
 erp = deps.get_erp_client()
 
 st.title("Tickets ERP")
 st.caption(f"Fausse API ERP : {erp.base_url}")
 
 try:
-    tickets = erp.list_tickets()
+    tickets = deps.memo("_tickets", erp.list_tickets, ttl=TICKETS_TTL_S)
 except ErpError as e:
     st.error(f"{ERP_INDISPONIBLE}. Les tickets ne peuvent pas être lus.", icon=":material/cloud_off:")
     st.caption(f"Détail : {e}")

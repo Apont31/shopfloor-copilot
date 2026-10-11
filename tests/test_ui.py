@@ -120,10 +120,47 @@ def analyser(at: AppTest) -> AppTest:
     return at
 
 
+# Widgets hors des cartes dont AppTest doit renvoyer la valeur après une réexécution de fragment.
+WIDGETS_PAGE = ("valideur", "filtre_sites", "filtre_verdicts")
+
+
+def _memoriser(at: AppTest) -> None:
+    """Valeurs des widgets de la page présents dans l'arbre (rendu complet), gardées pour rafraichir()."""
+    valeurs = getattr(at, "valeurs_page", {})
+    for w in (*at.text_input, *at.multiselect):
+        if w.key in WIDGETS_PAGE:
+            valeurs[w.key] = w.value
+    at.valeurs_page = valeurs
+
+
 def cliquer(at: AppTest, key: str) -> AppTest:
+    _memoriser(at)
     at.button(key=key).click().run()
     assert not at.exception, at.exception
     return at
+
+
+def rafraichir(at: AppTest, page: str | None = None) -> AppTest:
+    """Rendu complet de la page (ou d'une autre page) après une réexécution de fragment seule.
+
+    Limite d'AppTest : après un st.rerun ciblé sur des fragments, son arbre ne contient que les éléments de ces
+    fragments, et les widgets hors de ces fragments (valideur, filtres) perdent leur valeur au run complet suivant,
+    voire dès la réexécution de fragment suivante. Le navigateur, lui, garde et renvoie toujours tous les widgets :
+    on réinjecte les valeurs mémorisées au dernier rendu complet.
+    """
+    _memoriser(at)
+    for key, valeur in at.valeurs_page.items():
+        at.session_state[key] = valeur
+    if page is not None:
+        at.switch_page(page)
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+def fragments_seuls(at: AppTest) -> bool:
+    """Vrai si le dernier run n'a réexécuté que des fragments : ni le titre de la page ni la barre latérale."""
+    return at.title.len == 0 and at.sidebar.markdown.len == 0
 
 
 # --- Pages ----------------------------------------------------------------------------------------
@@ -209,7 +246,7 @@ def test_filtre_conserve_apres_la_derniere_fiche_decidee(env):
     """Un verdict choisi reste une option valide quand sa dernière fiche quitte la file."""
     at = analyser(app())
     at.multiselect(key="filtre_verdicts").select("CONFORME").run()
-    at = cliquer(at, "approuver_NC-2026-102")
+    at = rafraichir(cliquer(at, "approuver_NC-2026-102"))  # la décision ne réexécute que la carte
     assert at.multiselect(key="filtre_verdicts").value == ["CONFORME"]
     assert cartes(at) == [] and "Aucune fiche ne correspond aux filtres." in textes(at)
 
@@ -338,6 +375,265 @@ def test_section_en_erreur_relancer(env):
     at = analyser(at)
     assert env.service.journal.get_run("NC-2026-102").statut == "en_attente"
     assert "En erreur (3)" in textes(at) and carte("NC-2026-102") in textes(at)
+
+
+# --- Cartes en fragments et cache (étape 10d) -----------------------------------------------------
+
+
+ACTION_MODIFIEE = "Remplacer le mastic de bâche et refaire le test d'étanchéité avant cuisson."
+
+
+def test_modifier_zone_dans_la_carte_sans_rechargement_file_filtree_et_triee(env):
+    """Bug « Modifier » : la zone d'édition apparaît dans la carte, seule la carte est réexécutée, et l'envoi crée
+    le ticket avec l'action modifiée, sur la deuxième carte d'une file filtrée et triée."""
+    at = analyser(app())
+    at.multiselect(key="filtre_verdicts").select("NON_CONFORME").run()
+    assert cartes(at) == ["NC-2026-101", "NC-2026-115"]
+    proposee = next(it for it in env.service.list_pending() if it.run.nc_id == "NC-2026-115").proposition
+
+    at = cliquer(at, "modifier_NC-2026-115")
+    assert fragments_seuls(at)  # pas de rechargement de la page
+    assert cartes(at) == ["NC-2026-115"]  # seule cette carte a été réexécutée
+    zone = at.text_area(key="action_NC-2026-115")
+    assert zone.value == proposee["action_corrective"]  # préremplie
+    assert {b.key for b in at.button} == {"valider_edition_NC-2026-115", "annuler_NC-2026-115"}
+    assert at.button(key="valider_edition_NC-2026-115").label == "Envoyer"
+
+    zone.input(ACTION_MODIFIEE)
+    at.text_input(key="commentaire_NC-2026-115").input("Mastic changé.")
+    at = cliquer(at, "valider_edition_NC-2026-115")
+    assert fragments_seuls(at)
+    [ticket] = env.tickets()
+    assert (ticket["nc_id"], ticket["action_proposee"], ticket["commentaire"]) == (
+        "NC-2026-115", ACTION_MODIFIEE, "Mastic changé.")
+    assert env.service.journal.get_run("NC-2026-115").statut == "modifie"
+    assert env.service.journal.get_run("NC-2026-101").statut == "en_attente"  # l'autre carte n'a pas bougé
+    assert [s.value for s in at.success] == [brut(f"NC-2026-115 — Modifiée — ticket {ticket['id']}")]
+    assert "File de validation (1 sur 3)" in textes(at)
+    assert {m.label: m.value for m in at.metric}["À valider"] == "3"
+
+    at = rafraichir(at)  # rendu complet suivant : la fiche décidée a quitté la file, le filtre est conservé
+    assert cartes(at) == ["NC-2026-101"] and at.multiselect(key="filtre_verdicts").value == ["NON_CONFORME"]
+
+
+def test_modifier_puis_annuler_la_fiche_reste_en_attente(env):
+    at = cliquer(analyser(app()), "modifier_NC-2026-101")
+    at.text_area(key="action_NC-2026-101").input("Brouillon abandonné.")
+    at = cliquer(at, "annuler_NC-2026-101")
+    assert fragments_seuls(at)
+    assert at.text_area.len == 0
+    assert {b.key for b in at.button} == {"approuver_NC-2026-101", "modifier_NC-2026-101", "rejeter_NC-2026-101"}
+    assert env.tickets() == [] and env.service.journal.get_run("NC-2026-101").statut == "en_attente"
+    # Rouverte, la zone repart de la proposition.
+    at = cliquer(at, "modifier_NC-2026-101")
+    assert at.text_area(key="action_NC-2026-101").value == env.service.list_pending()[0].proposition[
+        "action_corrective"]
+
+
+def test_approuver_carte_remplacee_par_une_ligne_compacte(env):
+    at = cliquer(analyser(app()), "approuver_NC-2026-101")
+    assert fragments_seuls(at)
+    [ticket] = env.tickets()
+    assert [s.value for s in at.success] == [brut(f"NC-2026-101 — Approuvée — ticket {ticket['id']}")]
+    assert carte("NC-2026-101") not in textes(at)
+    assert "File de validation (3)" in textes(at)
+    assert {m.label: m.value for m in at.metric}["À valider"] == "3"
+
+
+def test_rejeter_ligne_compacte(env):
+    at = cliquer(analyser(app()), "rejeter_NC-2026-102")
+    assert fragments_seuls(at)
+    assert brut("NC-2026-102 — Rejetée — aucun ticket") in [i.value for i in at.info]
+
+
+def test_erp_indisponible_message_dans_la_carte_sans_rechargement(env):
+    at = analyser(app())
+    env.erp.actif = False
+    at = cliquer(at, "approuver_NC-2026-101")
+    assert fragments_seuls(at) and cartes(at) == ["NC-2026-101"]
+    [erreur] = at.error
+    assert "ERP indisponible" in erreur.value and "reste en attente" in erreur.value
+    assert at.button(key="approuver_NC-2026-101")  # la carte garde ses boutons
+    assert env.service.journal.get_run("NC-2026-101").statut == "en_attente"
+
+
+def test_erreur_de_rendu_dans_une_carte_sans_trace(env, monkeypatch):
+    """Exception imprévue pendant la réexécution d'une carte seule (hors du filet de app.py) : message lisible."""
+    at = analyser(app())
+
+    def panne(mesures):
+        raise ValueError("mesure illisible")
+
+    monkeypatch.setattr(format, "mesure_rows", panne)
+    at = cliquer(at, "modifier_NC-2026-101")
+    sans_trace(at)
+    [erreur] = at.error
+    assert "Erreur inattendue" in erreur.value
+    assert details_techniques(at).startswith("ValueError : mesure illisible")
+
+
+def _compter_lectures(env, monkeypatch) -> list[int]:
+    lectures = []
+    lire = env.service.list_pending
+
+    def compte():
+        lectures.append(1)
+        return lire()
+
+    monkeypatch.setattr(env.service, "list_pending", compte)
+    return lectures
+
+
+def test_analyse_une_seule_lecture_de_la_file(env, monkeypatch):
+    lectures = _compter_lectures(env, monkeypatch)
+    at = app()
+    lectures.clear()
+    analyser(at)
+    assert len(lectures) == 1  # une seule réexécution, à la fin de l'analyse
+
+
+def test_filtres_et_rendus_sans_relire_la_file(env, monkeypatch):
+    lectures = _compter_lectures(env, monkeypatch)
+    at = analyser(app())
+    lectures.clear()
+    at.multiselect(key="filtre_verdicts").select("NON_CONFORME").run()
+    at.multiselect(key="filtre_sites").select("Site Beta").run()
+    at.multiselect(key="filtre_verdicts").unselect("NON_CONFORME").run()
+    at.run()
+    assert lectures == [] and cartes(at) == ["NC-2026-101", "NC-2026-103"]
+    # Une décision invalide la file : relue une fois au rendu complet suivant.
+    rafraichir(cliquer(at, "approuver_NC-2026-101"))
+    assert len(lectures) == 1
+
+
+def test_decision_prise_ailleurs_jamais_de_file_perimee(env):
+    """Décision prise par une autre session ou la CLI : l'empreinte du journal invalide la file en cache."""
+    at = analyser(app())
+    env.service.decide("NC-2026-101", "approve", VALIDEUR)
+    at.run()
+    assert carte("NC-2026-101") not in textes(at) and "File de validation (3)" in textes(at)
+
+
+def test_pilotage_et_tickets_refletent_la_decision(env):
+    """Pilotage et Tickets lus avant la décision (mis en cache), puis relus après une décision dans la carte."""
+    at = analyser(app())
+    at = rafraichir(at, "views/pilotage.py")
+    assert {m.label: m.value for m in at.metric}["En attente"] == "4"
+    at = rafraichir(at, "views/tickets.py")
+    assert at.dataframe.len == 0
+    at = rafraichir(at, "views/inbox.py")
+    at = cliquer(at, "approuver_NC-2026-101")
+
+    at = rafraichir(at, "views/pilotage.py")
+    metriques = {m.label: m.value for m in at.metric}
+    assert (metriques["En attente"], metriques["Décidées"]) == ("3", "1")
+    at = rafraichir(at, "views/tickets.py")  # dans la durée de vie du cache : invalidé par la décision
+    assert [r["Fiche"] for r in at.dataframe[0].value.to_dict("records")] == ["NC-2026-101"]
+
+
+def test_memo_version_cle_et_duree_de_vie(monkeypatch):
+    etat, horloge, appels = {}, [100.0], []
+    monkeypatch.setattr(ui_deps, "st", type("St", (), {"session_state": etat}))
+    monkeypatch.setattr(ui_deps.time, "monotonic", lambda: horloge[0])
+
+    def calcul():
+        appels.append(1)
+        return len(appels)
+
+    assert ui_deps.memo("x", calcul, cle="a") == 1
+    assert ui_deps.memo("x", calcul, cle="a") == 1  # en cache
+    assert ui_deps.memo("x", calcul, cle="b") == 2  # source changée
+    ui_deps.invalider()
+    assert ui_deps.memo("x", calcul, cle="b") == 3  # version changée
+    assert ui_deps.memo("y", calcul, ttl=30) == 4
+    horloge[0] += 29
+    assert ui_deps.memo("y", calcul, ttl=30) == 4
+    horloge[0] += 2
+    assert ui_deps.memo("y", calcul, ttl=30) == 5  # durée de vie écoulée
+    assert ui_deps.memo("y", calcul, ttl=30, force=True) == 6
+    ui_deps.invalider()
+    assert ui_deps.memo("z", calcul, versionne=False) == 7
+    ui_deps.invalider()
+    assert ui_deps.memo("z", calcul, versionne=False) == 7  # voyants : indépendants des décisions
+
+
+def test_voyants_gardes_30_secondes():
+    assert ui_deps.VOYANTS_TTL_S == 30.0
+
+
+def test_journal_comptage_et_empreinte(tmp_path):
+    from shopfloor.journal import Journal
+
+    with Journal(tmp_path / "j.db") as j:
+        vide = j.fingerprint()
+        assert j.count_by_statut() == {} and vide == (0, 0, 0, None)
+        fiche = dict(site="S", procede="composite", part_ref="P", verdict="CONFORME", origine="deterministe",
+                     guard_ok=None, llm_ms=None)
+        j.record_pending(nc_id="NC-1", fichier="NC-1.md", **fiche)
+        j.record_pending(nc_id="NC-2", fichier="NC-2.md", **fiche)
+        j.record_error(nc_id="NC-3", fichier="NC-3.md", erreur="x")
+        e1 = j.fingerprint()
+        j.record_decision("NC-1", statut="approuve", decided_by="V", ticket_id="TCK-0001")
+        e2 = j.fingerprint()
+        j.delete_error("NC-3")
+        e3 = j.fingerprint()
+        assert len({vide, e1, e2, e3}) == 4
+        assert j.count_by_statut() == {"en_attente": 1, "approuve": 1}
+
+
+def test_ligne_decision():
+    assert format.ligne_decision(_run("approuve", "TCK-0001")) == ("success", "NC-1 — Approuvée — ticket TCK-0001")
+    assert format.ligne_decision(_run("modifie", "TCK-0002")) == ("success", "NC-1 — Modifiée — ticket TCK-0002")
+    assert format.ligne_decision(_run("rejete")) == ("info", "NC-1 — Rejetée — aucun ticket")
+    niveau, ligne = format.ligne_decision(_run("erreur", erreur="décision approuve, ticket non créé : X"))
+    assert niveau == "error" and ligne.startswith("NC-1 — Ticket non créé — ") and "En erreur" in ligne
+
+
+# --- Mesure de performance (15 fiches) ------------------------------------------------------------
+
+SEUIL_RENDU_S = 0.5  # mesure initiale (étape 10c) : 59 ms en médiane pour un rendu complet, 15 fiches en attente
+
+
+@pytest.fixture
+def env15(tmp_path, chroma_dir, monkeypatch):
+    e = Env(tmp_path, chroma_dir)
+    for f in INBOX.glob("*.md"):
+        shutil.copy(f, e.inbox / f.name)
+    e.llm.responses = [proposal_json(sources=[])] * 15
+    e.service.process_inbox(e.inbox)
+    monkeypatch.setattr(health, "_ollama_list", lambda host, timeout: None)
+    ui_deps.override(service=e.service, erp=e.erp, settings=e.settings, inbox_dir=e.inbox)
+    yield e
+    ui_deps.reset_overrides()
+    e.service.close()
+
+
+def nb_elements(at: AppTest) -> int:
+    def compter(node) -> int:
+        enfants = getattr(node, "children", {})
+        return 1 + sum(compter(c) for c in enfants.values())
+
+    return sum(compter(c) for c in at.main.children.values())
+
+
+def test_rendu_15_fiches_sous_le_seuil_et_carte_seule_au_clic(env15):
+    import statistics
+    import time
+
+    assert len(env15.service.list_pending()) == 15
+    at = app()
+    durees = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        at.run()
+        durees.append(time.perf_counter() - t0)
+    assert statistics.median(durees) < SEUIL_RENDU_S, durees
+    complet = nb_elements(at)
+    assert len(cartes(at)) == 15
+
+    at = cliquer(at, "modifier_NC-2026-101")
+    assert fragments_seuls(at)
+    assert nb_elements(at) * 10 < complet  # une carte seule est renvoyée au navigateur, pas la page
 
 
 # --- Erreurs inattendues et double lancement (étape 10c) ------------------------------------------

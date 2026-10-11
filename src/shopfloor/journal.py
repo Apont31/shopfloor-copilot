@@ -174,6 +174,22 @@ class Journal:
             row = self.conn.execute("SELECT * FROM runs WHERE nc_id = ?", (nc_id,)).fetchone()
         return None if row is None else _to_run(row)
 
+    def count_by_statut(self) -> dict[str, int]:
+        """Nombre de fiches par statut, sans lire les lignes (compteurs de l'interface)."""
+        with self.lock:
+            rows = self.conn.execute("SELECT statut, COUNT(*) FROM runs GROUP BY statut").fetchall()
+        return {statut: n for statut, n in rows}
+
+    def fingerprint(self) -> tuple:
+        """Empreinte du journal : change dès qu'une fiche est ajoutée, décidée ou effacée, quelle que soit la
+        session ou le processus. Sert à invalider les données gardées en cache par l'interface."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(statut = 'en_attente'), 0), MAX(decided_at) "
+                "FROM runs"
+            ).fetchone()
+        return tuple(row)
+
     def list_runs(self, **filtres: str | None) -> list[Run]:
         """Toutes les fiches, de la plus ancienne à la plus récente. Filtres par égalité : statut, site,
         procede, verdict, origine (une valeur None est ignorée)."""

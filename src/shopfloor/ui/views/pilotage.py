@@ -1,4 +1,8 @@
-"""Page « Pilotage » : indicateurs calculés sur le journal (shopfloor.kpis), graphiques, temps gagné estimé."""
+"""Page « Pilotage » : indicateurs calculés sur le journal (shopfloor.kpis), graphiques, temps gagné estimé.
+
+Indicateurs gardés dans la session, recalculés après une décision ou tout changement du journal (empreinte).
+Les curseurs du temps gagné ne réexécutent que leur bloc (fragment).
+"""
 
 import streamlit as st
 
@@ -6,7 +10,8 @@ from shopfloor.kpis import compute_kpis, estimate_time_saved
 from shopfloor.ui import charts, deps, style
 from shopfloor.ui.format import duree_s, libelle_procede, libelle_verdict, pct
 
-kpis = compute_kpis(deps.get_service().journal.list_runs())
+journal = deps.get_service().journal
+kpis = deps.memo("_kpis", lambda: compute_kpis(journal.list_runs()), cle=journal.fingerprint())
 
 st.title("Pilotage")
 st.caption("Indicateurs calculés sur le journal des traitements.")
@@ -65,7 +70,10 @@ with droite:
     st.altair_chart(charts.barres(origines, "Origine", "Fiches", texte="Libellé", couleurs=style.COULEURS_ORIGINE))
     st.caption("Déterministe : fiches « Conforme » ou « Indéterminé », ou repli après rejet du garde-fou.")
 
-with st.container(border=True):
+
+
+@st.fragment
+def _temps_gagne() -> None:
     st.subheader("Temps gagné estimé")
     st.caption("Hypothèse paramétrable, pas une mesure : le journal n'enregistre pas le temps passé par le valideur.")
     c1, c2, c3 = st.columns([2, 2, 1.4], vertical_alignment="center")
@@ -74,3 +82,7 @@ with st.container(border=True):
     heures = estimate_time_saved(kpis, sans, avec)
     c3.metric("Hypothèse", f"{heures:.1f} h")
     st.caption(f"{kpis.analysees} fiche(s) analysée(s) × ({sans} − {avec}) min.")
+
+
+with st.container(border=True):
+    _temps_gagne()
