@@ -54,5 +54,13 @@ def bandeau_html(texte: str) -> str:
     return f'<div class="sf-bandeau">{escape(texte, quote=False)}</div>'
 
 
+def erreur(message: str, detail: str | None = None) -> None:
+    """Message d'erreur lisible ; le détail technique, s'il existe, replié dans « Détails techniques »."""
+    st.error(message, icon=":material/error:")
+    if detail:
+        with st.expander("Détails techniques"):
+            st.code(detail, language=None)  # texte littéral, jamais interprété
+
+
 def label_html(texte: str) -> str:
     return f'<div class="sf-label">{escape(texte, quote=False)}</div>'

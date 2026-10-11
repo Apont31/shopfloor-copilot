@@ -1,5 +1,7 @@
 """Page « Boîte de réception » : analyse des nouvelles fiches, file de validation, fiches en erreur."""
 
+import logging
+
 import streamlit as st
 
 from shopfloor.erp.client import ErpError
@@ -9,13 +11,20 @@ from shopfloor.ui.format import texte_brut as brut  # tout texte non fiable (LLM
 
 service = deps.get_service()
 inbox_dir = deps.get_inbox_dir()
+log = logging.getLogger(__name__)
 
 
 # --- Actions (callbacks : exécutés avant le rendu suivant, la file affichée est donc à jour) -------
 
 
-def _flash(niveau: str, message: str) -> None:
-    st.session_state.setdefault("flash", []).append((niveau, message))
+def _flash(niveau: str, message: str, detail: str | None = None) -> None:
+    st.session_state.setdefault("flash", []).append((niveau, message, detail))
+
+
+def _flash_inattendue(e: Exception, action: str = format.ACTION_ERREUR) -> None:
+    """Exception imprévue : message clair et détail technique ; la trace complète va dans le terminal."""
+    log.error("Erreur inattendue dans la boîte de réception", exc_info=e)
+    _flash("error", *format.erreur_inattendue(e, action))
 
 
 def _decider(nc_id: str, decision: str) -> None:
@@ -30,6 +39,9 @@ def _decider(nc_id: str, decision: str) -> None:
     except ServiceError as e:
         _flash("error", f"{nc_id} : {e}")
         return
+    except Exception as e:
+        _flash_inattendue(e)
+        return
     st.session_state.pop(f"edition_{nc_id}", None)
     _flash(*format.decision_message(run))
 
@@ -40,7 +52,14 @@ def _relancer(nc_id: str) -> None:
     except ServiceError as e:
         _flash("error", str(e))
         return
+    except Exception as e:
+        _flash_inattendue(e)
+        return
     _flash("info", f"{nc_id} sera analysée de nouveau au prochain clic sur « Analyser les nouvelles fiches ».")
+
+
+def _demander_analyse() -> None:
+    st.session_state["analyse_en_cours"] = True  # bouton désactivé jusqu'à la fin de l'analyse
 
 
 def _basculer_edition(nc_id: str) -> None:
@@ -51,13 +70,13 @@ def _basculer_edition(nc_id: str) -> None:
 
 
 def _messages() -> None:
-    for niveau, message in st.session_state.pop("flash", []):
+    for niveau, message, detail in st.session_state.pop("flash", []):
         message = brut(message)  # peut citer une erreur contenant le texte d'une fiche
         if niveau == "success":
             st.toast(message, icon=":material/check_circle:")
             st.success(message, icon=":material/confirmation_number:")
         elif niveau == "error":
-            st.error(message, icon=":material/error:")
+            style.erreur(message, detail)
         else:
             st.info(message, icon=":material/info:")
 
@@ -152,8 +171,16 @@ c2.metric("À valider", len(pending))
 c3.metric("En erreur", len(erreurs))
 c4.metric("Déjà analysées", len(service.journal.list_runs()))
 
-if st.button("Analyser les nouvelles fiches", key="analyser", type="primary", icon=":material/play_arrow:"):
-    _analyser()
+# Drapeau posé par le clic et consommé ici : le bouton reste désactivé pendant toute l'analyse, puis se réactive
+# au rendu suivant, même si l'analyse est interrompue (pas de remise à zéro qui pourrait être sautée).
+en_cours = st.session_state.pop("analyse_en_cours", False)
+st.button("Analyser les nouvelles fiches", key="analyser", type="primary", icon=":material/play_arrow:",
+          disabled=en_cours, on_click=_demander_analyse)
+if en_cours:
+    try:
+        _analyser()
+    except Exception as e:
+        _flash_inattendue(e, format.ACTION_ERREUR_ANALYSE)
     st.rerun()  # compteurs, file et erreurs relus après l'analyse
 
 recap = st.session_state.get("recap")

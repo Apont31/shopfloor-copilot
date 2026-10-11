@@ -14,6 +14,7 @@ from shopfloor import cli
 from shopfloor.agent.graph import Deps
 from shopfloor.erp.api import create_app
 from shopfloor.erp.client import ErpClient
+from shopfloor.journal import Journal
 from shopfloor.oracle.loader import load_tolerances
 from shopfloor.rag.embeddings import FakeEmbedder
 from shopfloor.service import Service
@@ -74,6 +75,23 @@ def test_run_inbox_idempotent(service, inbox, capsys):
     out = capsys.readouterr().out
     assert "3 fiche(s), 0 traitée(s), 3 déjà journalisée(s) ignorée(s)" in out
     assert "Récapitulatif" not in out
+
+
+def test_run_inbox_fiche_journalisee_ailleurs_comptee_ignoree(tmp_path, service, inbox, capsys, monkeypatch):
+    """Un autre processus journalise NC-2026-101 pendant son traitement : ignorée, sans exception (étape 10c)."""
+    record_pending = service.journal.record_pending
+
+    def autre_processus_d_abord(**values):
+        if values["nc_id"] == "NC-2026-101":
+            with Journal(tmp_path / "journal.db") as autre:
+                autre.record_pending(**values)
+        return record_pending(**values)
+
+    monkeypatch.setattr(service.journal, "record_pending", autre_processus_d_abord)
+    assert cli.run_inbox(service, inbox) == 0
+    out = capsys.readouterr().out
+    assert "3 fiche(s), 2 traitée(s), 1 déjà journalisée(s) ignorée(s)" in out
+    assert ligne(out, "NC-2026-102")[0] == "NC-2026-102" and "NC-2026-101  " not in out
 
 
 def test_run_inbox_erreur_code_1(tmp_path, inbox, capsys):

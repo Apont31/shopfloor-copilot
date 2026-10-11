@@ -4,6 +4,7 @@ Seule cette couche écrit le journal ; les nœuds du graphe l'ignorent. L'état 
 est gardé par le checkpointer SQLite : une validation reprend après un redémarrage du processus.
 """
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -24,7 +25,7 @@ from shopfloor.agent.graph import (
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.erp.client import ErpUnavailableError
 from shopfloor.errors import ERP_INDISPONIBLE, TICKET_EXISTANT
-from shopfloor.journal import Journal, Run
+from shopfloor.journal import Journal, JournalError, Run
 from shopfloor.llm.chrono import ChronoLLM
 from shopfloor.rag.retriever import RetrievedChunk
 
@@ -84,6 +85,7 @@ class Service:
     def __init__(self, deps: Deps, *, state_db: str | Path, journal_db: str | Path):
         self.chrono = ChronoLLM(deps.llm) if deps.llm is not None else None
         self.erp = deps.erp
+        self._traitement = threading.Lock()  # une fiche de la boîte traitée à la fois (process_inbox)
         self._saver = sqlite_checkpointer(state_db)
         try:
             self.graph = build_graph(replace(deps, llm=self.chrono) if self.chrono else deps, self._saver)
@@ -108,7 +110,11 @@ class Service:
         """Traite chaque fiche dont le nc_id n'est pas encore journalisé, jusqu'à la validation humaine.
 
         Une fiche déjà journalisée, quel que soit son statut, est ignorée (relance d'une erreur : retry).
-        progress, s'il est fourni, est appelé avant chaque fiche traitée.
+        progress, s'il est fourni, est appelé avant chaque fiche à traiter.
+
+        Appels concurrents (deux sessions de l'interface sur le Service partagé, ou un autre processus) : une fiche
+        journalisée entre le listage et son traitement est ignorée, sans exception ni appel LLM en double. Les
+        fiches ignorées n'apparaissent pas dans le résultat.
         """
         todo = []
         for path in inbox_files(inbox_dir):
@@ -119,8 +125,25 @@ class Service:
         for i, (path, nc_id) in enumerate(todo, 1):
             if progress is not None:
                 progress(i, len(todo), nc_id)
-            results.append(_summary(self._process(path, nc_id)))
+            run = self._process_once(path, nc_id)
+            if run is not None:
+                results.append(_summary(run))
         return results
+
+    def _process_once(self, path: Path, nc_id: str) -> Run | None:
+        """Traite la fiche si elle n'est toujours pas journalisée ; None si elle l'est déjà (ignorée).
+
+        Une fiche à la fois par Service : la vérification et le traitement ne se chevauchent pas entre sessions,
+        et les durées LLM de deux fiches ne se mêlent pas. Un autre processus peut encore journaliser la fiche
+        pendant le traitement : l'insertion refusée (JournalError) vaut « déjà journalisée ».
+        """
+        with self._traitement:
+            if self.journal.get_run(nc_id) is not None:
+                return None
+            try:
+                return self._process(path, nc_id)
+            except JournalError:
+                return None
 
     def _process(self, path: Path, nc_id: str) -> Run:
         n0 = len(self.chrono.durations) if self.chrono else 0

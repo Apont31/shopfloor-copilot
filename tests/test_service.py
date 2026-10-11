@@ -5,6 +5,7 @@ FakeLLM, faux retriever, bases SQLite dans tmp_path et ERP en TestClient. Aucun 
 
 import logging
 import shutil
+import sys
 import threading
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from shopfloor.agent.state import CHECKPOINT_TYPES
 from shopfloor.erp.api import create_app
 from shopfloor.erp.client import ErpClient, ErpUnavailableError
 from shopfloor.erp.schemas import TicketCreate
+from shopfloor.journal import Journal
 from shopfloor.models import Verdict
 from shopfloor.nc import parse_nc_file
 from shopfloor.oracle.conformity import check_conformity
@@ -467,6 +469,127 @@ def test_process_inbox_progression(tmp_path, erp):
             shutil.copy(INBOX / f"{nc_id}.md", inbox / f"{nc_id}.md")
         service.process_inbox(inbox, progress=lambda i, n, nc_id: appels.append((i, n, nc_id)))
     assert appels == [(1, 2, "NC-2026-101"), (2, 2, "NC-2026-103")]
+
+
+# --- Concurrence : fiche journalisée par une autre session ou un autre processus (étape 10c) --------
+
+
+def test_fiche_journalisee_entre_listage_et_traitement(tmp_path, erp):
+    """Reproduction du bug : NC-2026-101 listée comme nouvelle, journalisée ailleurs avant son traitement."""
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102", "NC-2026-103")
+    llm = FakeLLM()  # aucun appel attendu : la seule NON_CONFORME est ignorée
+
+    def autre_session(i, n, nc_id):
+        if nc_id == "NC-2026-101":
+            with Journal(tmp_path / "journal.db") as autre:
+                autre.record_error(nc_id=nc_id, fichier=f"{nc_id}.md", erreur="traitée par une autre session")
+
+    with make_service(tmp_path, erp.client, llm) as service:
+        results = service.process_inbox(inbox, progress=autre_session)
+        assert [r.nc_id for r in results] == ["NC-2026-102", "NC-2026-103"]  # 101 ignorée, sans exception
+        assert llm.n_calls == 0
+        assert [r.nc_id for r in service.journal.list_runs()] == ["NC-2026-101", "NC-2026-102", "NC-2026-103"]
+        assert service.journal.get_run("NC-2026-101").erreur == "traitée par une autre session"
+
+
+def test_fiche_journalisee_pendant_son_traitement(tmp_path, erp, monkeypatch):
+    """Un autre processus journalise la fiche pendant l'appel LLM : insertion refusée, fiche ignorée."""
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102")
+    with make_service(tmp_path, erp.client, FakeLLM(proposal_json(sources=[]))) as service:
+        record_pending = service.journal.record_pending
+
+        def autre_processus_d_abord(**values):
+            with Journal(tmp_path / "journal.db") as autre:
+                autre.record_pending(**values)
+            return record_pending(**values)  # JournalError : déjà journalisée
+
+        monkeypatch.setattr(service.journal, "record_pending", autre_processus_d_abord)
+        results = service.process_inbox(inbox)
+        assert results == []  # les deux fiches journalisées par l'autre processus
+        assert [r.nc_id for r in service.journal.list_runs()] == ["NC-2026-101", "NC-2026-102"]
+
+
+def _en_parallele(n: int, cible) -> list[BaseException]:
+    """Lance cible(barriere) dans n threads ; renvoie les exceptions levées."""
+    barriere, erreurs = threading.Barrier(n, timeout=30), []
+
+    def run():
+        try:
+            cible(barriere)
+        except BaseException as e:  # remonté au thread principal
+            erreurs.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    return erreurs
+
+
+def test_process_inbox_concurrents_meme_service(tmp_path, erp):
+    """Deux sessions de l'interface sur le Service partagé (st.cache_resource), lancées ensemble."""
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102", "NC-2026-103")
+    llm = FakeLLM(proposal_json(sources=[]))  # un seul appel scripté : un appel en double échouerait
+    traitees = []
+    with make_service(tmp_path, erp.client, llm) as service:
+
+        def session(barriere):
+            # Chaque session a listé les 3 fiches avant que l'une d'elles ne commence le traitement.
+            progress = lambda i, n, nc_id: barriere.wait() if i == 1 else None  # noqa: E731
+            traitees.extend(r.nc_id for r in service.process_inbox(inbox, progress=progress))
+
+        assert _en_parallele(4, session) == []
+        assert sorted(traitees) == ["NC-2026-101", "NC-2026-102", "NC-2026-103"]  # chacune une seule fois
+        runs = service.journal.list_runs()
+        assert sorted(r.nc_id for r in runs) == sorted(traitees)
+        assert {r.statut for r in runs} == {"en_attente"}
+        assert llm.n_calls == 1
+        assert service.journal.get_run("NC-2026-101").origine == "llm"
+
+
+def test_diagnostic_a_wal_et_shm_orphelins_sans_effet(tmp_path, erp):
+    """Hypothèse (a) écartée : le journal n'utilise pas de -wal ; un -wal/-shm orphelin de la base d'état,
+    laissé par un arrêt brutal puis la suppression du seul .db, n'est pas rejoué : tout repart de zéro."""
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102")
+    service = make_service(tmp_path, erp.client, FakeLLM(proposal_json(sources=[])))
+    assert service.journal.conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    service.process_inbox(inbox)
+    for suffixe in ("-wal", "-shm"):  # état sur disque d'un processus tué : -wal et -shm présents
+        shutil.copy(tmp_path / f"state.db{suffixe}", tmp_path / f"orphelin{suffixe}")
+    service.close()
+    for nom in ("state.db", "journal.db"):
+        (tmp_path / nom).unlink()
+    for suffixe in ("-wal", "-shm"):
+        shutil.move(tmp_path / f"orphelin{suffixe}", tmp_path / f"state.db{suffixe}")
+    assert not (tmp_path / "journal.db-wal").exists()
+
+    llm = FakeLLM(proposal_json(sources=[]))
+    with make_service(tmp_path, erp.client, llm) as service:
+        assert [r.nc_id for r in service.process_inbox(inbox)] == ["NC-2026-101", "NC-2026-102"]
+        assert llm.n_calls == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="verrouillage des fichiers propre à Windows")
+def test_diagnostic_b_base_ouverte_non_supprimable_sous_windows(tmp_path, erp):
+    """Hypothèse (b) écartée : sous Windows, une base ouverte par le Service ne peut pas être supprimée
+    (WinError 32). Si la suppression a réussi, aucun Service en cache ne tenait ces fichiers."""
+    with make_service(tmp_path, erp.client) as service:
+        for nom in ("journal.db", "state.db"):
+            with pytest.raises(PermissionError):
+                (tmp_path / nom).unlink()
+        assert service.journal.list_runs() == []
+
+
+def test_process_inbox_successifs_deux_services(tmp_path, erp):
+    """Deux processus (CLI puis interface) sur les mêmes bases : le second ne retraite rien, sans exception."""
+    inbox = inbox_with(tmp_path, "NC-2026-101", "NC-2026-102", "NC-2026-103")
+    llm1, llm2 = FakeLLM(proposal_json(sources=[])), FakeLLM()
+    with make_service(tmp_path, erp.client, llm1) as cli_, make_service(tmp_path, erp.client, llm2) as ui:
+        assert len(cli_.process_inbox(inbox)) == 3
+        assert ui.process_inbox(inbox) == []
+        assert (llm1.n_calls, llm2.n_calls) == (1, 0)
+        assert len(ui.journal.list_runs()) == 3
 
 
 def test_list_pending_documents_similaires(en_attente):

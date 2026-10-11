@@ -340,6 +340,101 @@ def test_section_en_erreur_relancer(env):
     assert "En erreur (3)" in textes(at) and carte("NC-2026-102") in textes(at)
 
 
+# --- Erreurs inattendues et double lancement (étape 10c) ------------------------------------------
+
+
+def sans_trace(at: AppTest) -> None:
+    """Aucune exception rendue par Streamlit, aucune trace Python dans le texte affiché."""
+    assert at.exception.len == 0, at.exception
+    tout = textes(at) + "\n".join(str(c.value) for c in at.code)
+    assert "Traceback" not in tout and 'File "' not in tout
+
+
+def details_techniques(at: AppTest) -> str:
+    [expander] = [e for e in at.expander if e.label == "Détails techniques"]
+    return "\n".join(c.value for c in expander.code)
+
+
+def test_analyse_exception_inattendue_message_clair(env, monkeypatch):
+    def panne(*args, **kwargs):
+        raise RuntimeError("UNIQUE constraint failed: runs.nc_id")
+
+    monkeypatch.setattr(env.service, "process_inbox", panne)
+    at = analyser(app())
+    sans_trace(at)
+    [erreur] = at.error
+    assert erreur.value.startswith(brut("Erreur inattendue : l'opération n'a pas abouti."))
+    assert brut("relancez « Analyser les nouvelles fiches »") in erreur.value
+    assert details_techniques(at).startswith("RuntimeError : UNIQUE constraint failed: runs.nc_id")
+    assert not at.button(key="analyser").disabled  # jamais bloqué après une erreur
+    assert "File de validation (0)" in textes(at)  # le reste de la page est rendu
+
+
+def test_page_exception_inattendue_message_clair(env, monkeypatch):
+    def panne():
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(env.service, "list_pending", panne)
+    at = app()
+    sans_trace(at)
+    [erreur] = at.error
+    assert "Erreur inattendue" in erreur.value and "Rechargez la page" in erreur.value
+    assert details_techniques(at).startswith("OSError : disque plein")
+
+
+def test_decision_exception_inattendue_message_clair(env, monkeypatch):
+    at = analyser(app())
+
+    def panne(*args, **kwargs):
+        raise KeyError("proposition")
+
+    monkeypatch.setattr(env.service, "decide", panne)
+    at = cliquer(at, "approuver_NC-2026-101")
+    sans_trace(at)
+    [erreur] = at.error
+    assert brut("Erreur inattendue") in erreur.value and "Rechargez la page" in erreur.value
+    assert details_techniques(at).startswith("KeyError : 'proposition'")
+    assert carte("NC-2026-101") in textes(at)  # la fiche reste dans la file
+
+
+def test_bouton_analyser_desactive_pendant_l_analyse(env, monkeypatch):
+    """Analyse interrompue en cours (st.stop) : l'écran figé montre le bouton désactivé ; il est réactivé ensuite."""
+    import streamlit as st
+
+    appels = []
+
+    def analyse_interrompue(*args, **kwargs):
+        appels.append(1)
+        st.stop()
+
+    monkeypatch.setattr(env.service, "process_inbox", analyse_interrompue)
+    at = analyser(app())
+    assert at.button(key="analyser").disabled  # rendu avant l'analyse : pas de second lancement possible
+    assert "analyse_en_cours" not in at.session_state  # drapeau consommé : rien ne reste bloqué
+    at.run()
+    assert not at.button(key="analyser").disabled
+    assert appels == [1]  # pas de relance de l'analyse au rendu suivant
+
+
+def test_analyser_deux_clics_chaque_fiche_journalisee_une_fois(env):
+    at = analyser(analyser(app()))
+    assert sorted(r.nc_id for r in env.service.journal.list_runs()) == sorted(FICHES)
+    assert env.llm.n_calls == 2
+    sans_trace(at)
+
+
+def test_erreur_inattendue_message_et_detail():
+    try:
+        {}["absente"]
+    except KeyError as e:
+        message, detail = format.erreur_inattendue(e)
+    assert message == f"Erreur inattendue : l'opération n'a pas abouti. {format.ACTION_ERREUR}"
+    assert detail.splitlines()[0] == "KeyError : 'absente'"
+    assert detail.splitlines()[1].startswith("test_ui.py:") and "Traceback" not in detail
+    message, detail = format.erreur_inattendue(ValueError("x"), "Relancez.")  # exception jamais levée
+    assert (message, detail) == ("Erreur inattendue : l'opération n'a pas abouti. Relancez.", "ValueError : x")
+
+
 # --- Voyants --------------------------------------------------------------------------------------
 
 

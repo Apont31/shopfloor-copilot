@@ -6,8 +6,10 @@ Les libellés ne servent qu'à l'affichage : le YAML, les modèles, l'oracle et 
 """
 
 import re
+import traceback
 from collections import Counter
 from collections.abc import Iterable
+from pathlib import Path
 
 from shopfloor.erp.schemas import Ticket
 from shopfloor.journal import Run
@@ -170,6 +172,22 @@ def ticket_rows(tickets: list[Ticket]) -> list[dict]:
         }
         for t in tickets
     ]
+
+
+ACTION_ERREUR = ("Rechargez la page puis recommencez. Si l'erreur persiste, vérifiez les voyants de la barre "
+                 "latérale et le terminal du serveur Streamlit.")
+ACTION_ERREUR_ANALYSE = ("Les fiches déjà analysées sont conservées : relancez « Analyser les nouvelles fiches » "
+                         "pour traiter les autres. Si l'erreur persiste, vérifiez les voyants de la barre latérale.")
+
+
+def erreur_inattendue(e: BaseException, action: str = ACTION_ERREUR) -> tuple[str, str]:
+    """(message pour l'utilisateur, détail technique) d'une exception imprévue : type, message et dernier
+    emplacement, jamais la trace Python complète (elle va dans le terminal du serveur)."""
+    detail = f"{type(e).__name__} : {e}"
+    pile = traceback.extract_tb(e.__traceback__)
+    if pile:
+        detail += f"\n{Path(pile[-1].filename).name}:{pile[-1].lineno} ({pile[-1].name})"
+    return f"Erreur inattendue : l'opération n'a pas abouti. {action}", detail
 
 
 def decision_message(run: Run) -> tuple[str, str]:

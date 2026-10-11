@@ -4,9 +4,11 @@ Lancement depuis la racine du dépôt : python -m streamlit run src/shopfloor/ui
 L'interface ne décide de rien : elle appelle le Service (shopfloor.service) et des fonctions pures.
 """
 
+import logging
+
 import streamlit as st
 
-from shopfloor.ui import deps, style
+from shopfloor.ui import deps, format, style
 
 st.set_page_config(page_title="ShopFloor Copilot", page_icon=":material/precision_manufacturing:", layout="wide")
 style.inject()
@@ -31,4 +33,8 @@ with st.sidebar:
     st.divider()
     st.markdown(style.bandeau_html("Données fictives — 100 % local"), unsafe_allow_html=True)
 
-page.run()
+try:
+    page.run()
+except Exception as e:  # filet de sécurité, jamais de trace à l'écran (st.stop et st.rerun ne sont pas des Exception)
+    logging.getLogger(__name__).error("Erreur inattendue dans la page %s", page.title, exc_info=e)
+    style.erreur(*format.erreur_inattendue(e))
