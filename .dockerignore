@@ -1,0 +1,14 @@
+.venv
+.git
+.chroma
+*.db*
+tests
+docs/img
+__pycache__
+**/__pycache__
+.pytest_cache
+# Ni secrets locaux ni métadonnées d'outils dans l'image.
+.env
+.claude
+.github
+**/*.egg-info

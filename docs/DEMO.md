@@ -19,6 +19,13 @@ python -m shopfloor.cli process data/nc_inbox/NC-2026-101.md --valide-par "Démo
 python -m streamlit run src/shopfloor/ui/app.py
 ```
 
+Variante avec Docker (remplace T1, T2 et `reset`) :
+
+```bash
+docker compose down -v ; docker compose up -d        # bases vides, ERP et interface
+docker compose run --rm ingest                       # index RAG
+```
+
 Ouvrir **http://127.0.0.1:8501** (pas `localhost` : l'interface n'écoute que sur 127.0.0.1). Vérifier les trois voyants verts et saisir un nom dans « Valideur ». Navigateur en plein écran, zoom à 110 %.
 
 ## Déroulé

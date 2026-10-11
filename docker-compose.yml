@@ -1,0 +1,72 @@
+# ShopFloor Copilot avec Docker. Ollama tourne sur l'hôte (avec qwen2.5:7b-instruct et nomic-embed-text).
+#   docker compose up -d                 serveur ERP + interface
+#   docker compose run --rm ingest       indexation des documents (profil tools)
+#   docker compose down -v               arrêt et remise à zéro (bases et index supprimés)
+# Ports publiés sur 127.0.0.1 uniquement : rien n'est exposé au réseau.
+
+x-shopfloor: &shopfloor
+  image: ghcr.io/apont31/shopfloor-copilot:latest
+  build: .
+
+x-ollama: &ollama
+  OLLAMA_HOST: http://host.docker.internal:11434
+
+services:
+  erp:
+    <<: *shopfloor
+    command: ["uvicorn", "shopfloor.erp.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - erp-data:/var/lib/shopfloor/erp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  ui:
+    <<: *shopfloor
+    command: ["streamlit", "run", "src/shopfloor/ui/app.py"]
+    environment:
+      <<: *ollama
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+      ERP_URL: http://erp:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - bases:/var/lib/shopfloor/bases
+      - chroma:/var/lib/shopfloor/chroma
+      - ./data:/app/data:ro
+    depends_on:
+      erp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  ingest:
+    <<: *shopfloor
+    profiles: ["tools"]
+    command: ["python", "-m", "shopfloor.cli", "ingest"]
+    environment:
+      <<: *ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - bases:/var/lib/shopfloor/bases
+      - chroma:/var/lib/shopfloor/chroma
+      - ./data:/app/data:ro
+
+volumes:
+  erp-data:
+  bases:
+  chroma:

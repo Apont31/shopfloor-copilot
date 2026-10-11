@@ -91,6 +91,8 @@ Ticket créé : TCK-0001
 
 Prérequis : Windows ou Linux, Python 3.12, [Ollama](https://ollama.com) avec `qwen2.5:7b-instruct` et `nomic-embed-text`.
 
+Sous Windows, certaines dépendances dépassent la limite de 260 caractères des chemins : cloner dans un chemin court (par exemple `C:\dev\`) ou activer les chemins longs.
+
 ```bash
 python -m venv .venv            # puis activer l'environnement
 pip install -r requirements.lock
@@ -130,12 +132,31 @@ python -m shopfloor.cli reset                         # demande confirmation ; -
 
 Script de démo de 2 minutes : [docs/DEMO.md](docs/DEMO.md).
 
+## Lancer avec Docker
+
+Prérequis : Docker, et Ollama sur l'hôte avec `qwen2.5:7b-instruct` et `nomic-embed-text`. Ollama n'est pas dans un conteneur : l'interface le joint par `host.docker.internal`. Sous Linux, Ollama doit écouter au-delà de 127.0.0.1 (`OLLAMA_HOST=0.0.0.0`).
+
+```bash
+docker compose up -d                 # serveur ERP et interface
+docker compose run --rm ingest       # indexer les documents (une fois)
+```
+
+Puis ouvrir **http://127.0.0.1:8501**. Les ports ne sont publiés que sur 127.0.0.1.
+
+Remise à zéro (conteneurs arrêtés, bases ERP, journal, file de validation et index supprimés) :
+
+```bash
+docker compose down -v
+```
+
+Les images sont publiées automatiquement sur GHCR à chaque version (CD).
+
 ## Qualité
 
-- 630 tests : 616 sans LLM (`pytest -m "not llm"`) et 14 avec le vrai Ollama (`pytest -m llm`).
+- 644 tests : 630 sans LLM (`pytest -m "not llm"`) et 14 avec le vrai Ollama (`pytest -m llm`).
 - Bornes de l'oracle testées aux valeurs limites. Mutations manuelles des comparaisons (`>` en `>=`, `<` en `<=`, borne supprimée) : toutes détectées.
 - Évaluation du retrieval : hit@3 = 5/5.
-- CI GitHub Actions sur Ubuntu et Windows, Python 3.12 : tests sans LLM à chaque push sur main et à chaque pull request.
+- CI GitHub Actions sur Ubuntu et Windows, Python 3.12 : tests sans LLM et construction de l'image Docker à chaque push sur main et à chaque pull request.
 
 ## Ce que ce projet démontre
 
@@ -152,7 +173,6 @@ Script de démo de 2 minutes : [docs/DEMO.md](docs/DEMO.md).
 
 ## Roadmap
 
-- Images Docker publiées par CD.
 - Assistant questions-réponses sur les procédures.
 - API d'entrée des fiches.
 - OCR des fiches scannées.
