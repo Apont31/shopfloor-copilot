@@ -66,8 +66,8 @@ def test_approve_ticket_cree(chroma_dir, erp_http, capsys):
     assert ticket["verdict"] == "NON_CONFORME" and ticket["nc_id"] == "NC-2026-101"
     assert f"Ticket créé : {ticket['id']}" in out
     # Affichage : verdict, tableau des mesures, documents similaires, proposition, durée LLM.
-    assert "Verdict de l'oracle : NON_CONFORME" in out
-    assert "porosite" in out and "2.8 %" in out and "2.0" in out and "0.8 %" in out
+    assert "Verdict de l'oracle : Non conforme" in out
+    assert "Porosité" in out and "2.8 %" in out and "2.0" in out and "0.8 %" in out
     assert out.count("score=") == 3
     assert "Proposition (origine : llm)" in out
     assert "ALERTE" not in out
@@ -123,7 +123,7 @@ def test_sans_llm_conforme(chroma_dir, erp_http, capsys):
     erp = ErpClient("http://testserver", http_client=erp_http)
     assert cli.run_process(NC_102, deps(chroma_dir, erp), lambda p: APPROVE) == 0
     out = capsys.readouterr().out
-    assert "Verdict de l'oracle : CONFORME" in out
+    assert "Verdict de l'oracle : Conforme" in out
     assert "Appel LLM : aucun" in out
     assert erp_http.get("/tickets").json()[0]["verdict"] == "CONFORME"
 
@@ -262,6 +262,6 @@ def test_fmt_mesure(valeur, unite, attendu):
 def test_tableau_oracle_ecart_avec_unite(chroma_dir, erp_http, capsys):
     erp = ErpClient("http://testserver", http_client=erp_http)
     cli.run_process(NC_101, deps(chroma_dir, erp, llm_ok()), lambda p: REJECT)
-    [ligne] = [l for l in capsys.readouterr().out.splitlines() if l.strip().startswith("porosite")]
-    assert ligne.split() == ["porosite", "2.8", "%", "-", "2.0", "0.8", "%", "NON_CONFORME"]
+    [ligne] = [l for l in capsys.readouterr().out.splitlines() if l.strip().startswith("Porosité")]
+    assert ligne.split() == ["Porosité", "2.8", "%", "-", "2.0", "0.8", "%", "Non", "conforme"]
     assert "pct" not in ligne

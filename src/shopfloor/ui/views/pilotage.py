@@ -4,7 +4,7 @@ import streamlit as st
 
 from shopfloor.kpis import compute_kpis, estimate_time_saved
 from shopfloor.ui import charts, deps, style
-from shopfloor.ui.format import duree_s, pct
+from shopfloor.ui.format import duree_s, libelle_procede, libelle_verdict, pct
 
 kpis = compute_kpis(deps.get_service().journal.list_runs())
 
@@ -27,12 +27,12 @@ if kpis.traitees == 0:
     st.stop()
 
 
-def _groupes(groupes: dict, nom: str) -> list[dict]:
+def _groupes(groupes: dict, nom: str, libelle=str) -> list[dict]:
     rows = []
     for cle, g in groupes.items():
         acceptation = pct(g.taux_acceptation)
         rows.append({
-            nom: cle, "Fiches": g.nb, "Décidées": g.decidees, "Acceptation": acceptation,
+            nom: libelle(cle), "Fiches": g.nb, "Décidées": g.decidees, "Acceptation": acceptation,
             "Libellé": f"{g.nb}" + (f" · {acceptation} acceptées" if g.taux_acceptation is not None else ""),
         })
     return sorted(rows, key=lambda r: -r["Fiches"])
@@ -44,14 +44,15 @@ with gauche:
     st.altair_chart(charts.barres(_groupes(kpis.par_site, "Site"), "Site", "Fiches", texte="Libellé"))
 with droite:
     st.subheader("Par procédé")
-    st.altair_chart(charts.barres(_groupes(kpis.par_procede, "Procédé"), "Procédé", "Fiches", texte="Libellé"))
+    procedes = _groupes(kpis.par_procede, "Procédé", libelle_procede)
+    st.altair_chart(charts.barres(procedes, "Procédé", "Fiches", texte="Libellé"))
 st.caption("Acceptation : part des décisions suivies d'un ticket (approuvées ou modifiées).")
 
 gauche, droite = st.columns(2, gap="large")
 with gauche:
     st.subheader("Verdicts de l'oracle")
-    verdicts = [{"Verdict": style.LIBELLE_VERDICT[v], "Fiches": n} for v, n in kpis.verdicts.items()]
-    couleurs = {style.LIBELLE_VERDICT[v]: c for v, c in style.COULEURS_VERDICT.items()}
+    verdicts = [{"Verdict": libelle_verdict(v), "Fiches": n} for v, n in kpis.verdicts.items()]
+    couleurs = {libelle_verdict(v): c for v, c in style.COULEURS_VERDICT.items()}
     st.altair_chart(charts.barres(verdicts, "Verdict", "Fiches", couleurs=couleurs))
 with droite:
     st.subheader("Origine des propositions")
@@ -62,7 +63,7 @@ with droite:
          "Libellé": f"{kpis.nb_deterministe} · {pct(kpis.part_deterministe)}"},
     ]
     st.altair_chart(charts.barres(origines, "Origine", "Fiches", texte="Libellé", couleurs=style.COULEURS_ORIGINE))
-    st.caption("Déterministe : fiches CONFORME ou INDÉTERMINÉ, ou repli après rejet du garde-fou.")
+    st.caption("Déterministe : fiches « Conforme » ou « Indéterminé », ou repli après rejet du garde-fou.")
 
 with st.container(border=True):
     st.subheader("Temps gagné estimé")

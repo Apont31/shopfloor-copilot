@@ -111,12 +111,12 @@ def _carte(item: PendingItem, valideur: str) -> None:
     with st.container(border=True):
         gauche, droite = st.columns([4, 1], vertical_alignment="center")
         gauche.markdown(f"#### {brut(run.nc_id)}")
-        gauche.caption(brut(f"{run.site} · {run.procede} · pièce {run.part_ref}"))
+        gauche.caption(brut(f"{run.site} · {format.libelle_procede(run.procede)} · pièce {run.part_ref}"))
         with droite:  # verdict de l'oracle uniquement ; jamais déduit ni remplacé par l'interface
             if item.verdict is None:
                 st.badge("Verdict inconnu", color="gray", icon=":material/help:")
             else:
-                st.badge(style.LIBELLE_VERDICT[item.verdict], color=style.BADGE_VERDICT[item.verdict],
+                st.badge(format.libelle_verdict(item.verdict), color=style.BADGE_VERDICT[item.verdict],
                          icon=":material/gavel:")
 
         st.markdown(style.label_html("Mesures et verdict de l'oracle"), unsafe_allow_html=True)
@@ -150,7 +150,7 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fiches dans la boîte", n_fichiers)
 c2.metric("À valider", len(pending))
 c3.metric("En erreur", len(erreurs))
-c4.metric("Déjà journalisées", len(service.journal.list_runs()))
+c4.metric("Déjà analysées", len(service.journal.list_runs()))
 
 if st.button("Analyser les nouvelles fiches", key="analyser", type="primary", icon=":material/play_arrow:"):
     _analyser()
@@ -170,7 +170,7 @@ sites, verdicts = format.options_filtres(
 f1, f2 = st.columns(2)
 choix_sites = f1.multiselect("Site", sites, key="filtre_sites", placeholder="Tous les sites")
 choix_verdicts = f2.multiselect("Verdict", verdicts, key="filtre_verdicts", placeholder="Tous les verdicts",
-                                format_func=lambda v: style.LIBELLE_VERDICT.get(v, v))
+                                format_func=format.libelle_verdict)
 affichees = format.filtrer_trier(pending, choix_sites, choix_verdicts)  # par gravité, puis par nc_id
 
 compte = f"{len(affichees)} sur {len(pending)}" if len(affichees) != len(pending) else f"{len(pending)}"

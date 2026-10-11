@@ -29,6 +29,7 @@ from shopfloor.rag.embeddings import OllamaEmbedder
 from shopfloor.rag.ingest import ingest
 from shopfloor.rag.retriever import make_retriever, retrieve_similar
 from shopfloor.service import Service, ServiceError, inbox_files
+from shopfloor.ui.format import fmt_mesure, libelle_caracteristique, libelle_procede, libelle_verdict
 
 ROOT = Path(__file__).resolve().parents[2]
 TOLERANCES_PATH = ROOT / "config" / "tolerances.yaml"
@@ -44,26 +45,15 @@ def _fmt(v) -> str:
     return "-" if v is None else str(v)
 
 
-# Affichage uniquement : le YAML, les modèles et l'oracle gardent les codes d'unité.
-UNITES_AFFICHEES = {"pct": "%", "um": "µm", "deg": "°", "degC": "°C"}
-
-
-def fmt_mesure(v, unite: str) -> str:
-    """Valeur suivie de son unité lisible : 2.8 pct -> « 2.8 % », 91.2 deg -> « 91.2° ». None -> « - »."""
-    if v is None:
-        return "-"
-    symbole = UNITES_AFFICHEES.get(unite, unite)
-    return f"{v}{symbole}" if symbole == "°" else f"{v} {symbole}"
-
-
+# Affichage uniquement (libellés et unités : shopfloor.ui.format) : le YAML, les modèles et l'oracle gardent les codes.
 def _print_oracle(state: AgentState) -> None:
     oracle = state.oracle
-    print(f"Fiche {oracle.nc_id} - pièce {state.nc.part_ref}, procédé {state.nc.procede}")
-    print(f"Verdict de l'oracle : {oracle.verdict.value}")
+    print(f"Fiche {oracle.nc_id} - pièce {state.nc.part_ref}, procédé {libelle_procede(state.nc.procede)}")
+    print(f"Verdict de l'oracle : {libelle_verdict(oracle.verdict.value)}")
     rows = [("Caractéristique", "Valeur", "Min", "Max", "Écart", "Statut")]
     rows += [
-        (d.caracteristique, fmt_mesure(d.valeur, d.unite), _fmt(d.min), _fmt(d.max), fmt_mesure(d.ecart, d.unite),
-         d.statut.value)
+        (libelle_caracteristique(d.caracteristique), fmt_mesure(d.valeur, d.unite), _fmt(d.min), _fmt(d.max),
+         fmt_mesure(d.ecart, d.unite), libelle_verdict(d.statut.value))
         for d in oracle.details
     ]
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
@@ -176,7 +166,7 @@ def run_inbox(service: Service, inbox_dir: str | Path) -> int:
         return 0
     print()
     rows = [("Fiche", "Verdict", "Statut", "Origine", "LLM", "Détail")]
-    rows += [(r.nc_id, _fmt(r.verdict), r.statut, r.origine, _fmt_ms(r.llm_ms), r.erreur or "") for r in results]
+    rows += [(r.nc_id, libelle_verdict(r.verdict), r.statut, r.origine, _fmt_ms(r.llm_ms), r.erreur or "") for r in results]
     _table(rows)
     statuts: dict[str, int] = {}
     for r in results:
@@ -192,11 +182,12 @@ def print_pending(service: Service) -> int:
     print(f"File de validation : {len(items)} fiche(s) en attente")
     for it in items:
         run = it.run
-        print(f"\n{run.nc_id}  {_fmt(it.verdict)}  - pièce {run.part_ref} ({run.procede}), {run.site}, "
-              f"traitée le {run.created_at:%Y-%m-%d %H:%M} UTC")
+        print(f"\n{run.nc_id}  {libelle_verdict(it.verdict)}  - pièce {run.part_ref} "
+              f"({libelle_procede(run.procede)}), {run.site}, traitée le {run.created_at:%Y-%m-%d %H:%M} UTC")
         for m in it.mesures:
-            print(f"  Mesure      : {m['caracteristique']} {fmt_mesure(m['valeur'], m['unite'])} "
-                  f"(min {_fmt(m['min'])}, max {_fmt(m['max'])}) {m['statut']}")
+            print(f"  Mesure      : {libelle_caracteristique(m['caracteristique'])} "
+                  f"{fmt_mesure(m['valeur'], m['unite'])} (min {_fmt(m['min'])}, max {_fmt(m['max'])}) "
+                  f"{libelle_verdict(m['statut'])}")
         p = it.proposition
         if p is None:
             print("  ERREUR : état de validation introuvable dans la base d'état")

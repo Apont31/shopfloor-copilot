@@ -5,7 +5,7 @@ import streamlit as st
 from shopfloor.erp.client import ErpError
 from shopfloor.errors import ERP_INDISPONIBLE
 from shopfloor.ui import deps
-from shopfloor.ui.format import ticket_rows
+from shopfloor.ui.format import LARGEURS_TICKETS, ticket_rows
 
 erp = deps.get_erp_client()
 
@@ -24,5 +24,6 @@ if not tickets:
     st.info("Aucun ticket : approuvez ou modifiez une fiche depuis la boîte de réception.",
             icon=":material/confirmation_number:")
 else:
-    st.dataframe(ticket_rows(tickets), hide_index=True, width="stretch")
+    colonnes = {nom: st.column_config.TextColumn(nom, width=px) for nom, px in LARGEURS_TICKETS.items()}
+    st.dataframe(ticket_rows(tickets), hide_index=True, width="stretch", column_config=colonnes)
     st.caption("Règles : empreinte abrégée des tolérances appliquées par l'oracle (rules_hash).")

@@ -5,6 +5,7 @@ la sonde Ollama est remplacée, sauf dans le test des voyants rouges (port ferm�
 """
 
 import datetime
+import json
 import shutil
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from shopfloor.erp.api import create_app
 from shopfloor.erp.client import ErpClient
 from shopfloor.erp.schemas import Ticket
 from shopfloor.journal import Run
+from shopfloor.models import Verdict
 from shopfloor.oracle.loader import load_tolerances
 from shopfloor.rag.embeddings import FakeEmbedder
 from shopfloor.rag.ingest import ingest
@@ -155,17 +157,17 @@ def test_analyser_remplit_la_file(env):
     assert "File de validation (4)" in tout
     for nc_id in FICHES:
         assert carte(nc_id) in tout
-    assert brut("Atelier Nord (fictif) · composite · pièce CP-210") in tout
+    assert brut("Site Beta · Composite · pièce CP-210") in tout
     # Badges de verdict (couleurs de statut) et d'origine.
-    assert ":red-badge[:material/gavel: NON CONFORME]" in tout
-    assert ":green-badge[:material/gavel: CONFORME]" in tout
-    assert ":orange-badge[:material/gavel: INDÉTERMINÉ]" in tout
+    assert ":red-badge[:material/gavel: Non conforme]" in tout
+    assert ":green-badge[:material/gavel: Conforme]" in tout
+    assert ":orange-badge[:material/gavel: Indéterminé]" in tout
     assert ":blue-badge[Origine : LLM]" in tout and ":violet-badge[Origine : Déterministe]" in tout
     # Mesures avec unités lisibles, y compris sur min et max.
     mesures = at.dataframe[1].value  # [0] : récapitulatif de l'analyse
     assert mesures.to_dict("records")[0] == {
-        "Caractéristique": "porosite", "Valeur": "2.8 %", "Min": "-", "Max": "2.0 %", "Écart": "0.8 %",
-        "Statut": "NON_CONFORME",
+        "Caractéristique": "Porosité", "Valeur": "2.8 %", "Min": "-", "Max": "2.0 %", "Écart": "0.8 %",
+        "Statut": "Non conforme",
     }
     # Documents similaires avec score ; passages dans un expander.
     assert f"**{brut('NC-2025-014')}** · Cause racine · score 0.82" in tout
@@ -176,6 +178,12 @@ def test_analyser_remplit_la_file(env):
     assert env.llm.n_calls == 2
 
 
+def test_compteur_deja_analysees(env):
+    env.service.process_inbox(env.inbox)
+    metriques = {m.label: m.value for m in app().metric}
+    assert metriques["Déjà analysées"] == "4" and "Déjà journalisées" not in metriques
+
+
 def test_file_triee_par_gravite_puis_nc_id(env):
     at = analyser(app())
     assert cartes(at) == ["NC-2026-101", "NC-2026-115", "NC-2026-103", "NC-2026-102"]
@@ -183,16 +191,16 @@ def test_file_triee_par_gravite_puis_nc_id(env):
 
 def test_filtres_site_et_verdict(env):
     at = analyser(app())
-    assert at.multiselect(key="filtre_verdicts").options == ["NON CONFORME", "INDÉTERMINÉ", "CONFORME"]
+    assert at.multiselect(key="filtre_verdicts").options == ["Non conforme", "Indéterminé", "Conforme"]
     at.multiselect(key="filtre_verdicts").select("NON_CONFORME").run()
     assert cartes(at) == ["NC-2026-101", "NC-2026-115"]
     assert "File de validation (2 sur 4)" in textes(at)
 
-    at.multiselect(key="filtre_sites").select("Atelier Nord (fictif)").run()
+    at.multiselect(key="filtre_sites").select("Site Beta").run()
     assert cartes(at) == ["NC-2026-101"]
     at.multiselect(key="filtre_verdicts").unselect("NON_CONFORME").run()
-    assert cartes(at) == ["NC-2026-101", "NC-2026-103"]  # NC-2026-102 : Atelier Sud
-    at.multiselect(key="filtre_sites").unselect("Atelier Nord (fictif)").select("Site Alpha").run()
+    assert cartes(at) == ["NC-2026-101", "NC-2026-103"]  # NC-2026-102 : Site Delta
+    at.multiselect(key="filtre_sites").unselect("Site Beta").select("Site Alpha").run()
     at.multiselect(key="filtre_verdicts").select("CONFORME").run()
     assert cartes(at) == [] and "Aucune fiche ne correspond aux filtres." in textes(at)
 
@@ -299,7 +307,7 @@ def test_base_d_etat_perdue_carte_sans_decision(env, tmp_path):
         env.service._saver.delete_thread(nc_id)
     at = app()
     tout = textes(at)
-    assert ":red-badge[:material/gavel: NON CONFORME]" in tout  # verdict journalisé par l'oracle
+    assert ":red-badge[:material/gavel: Non conforme]" in tout  # verdict journalisé par l'oracle
     assert at.error.len == 4 and "État de validation introuvable" in at.error[0].value
     assert not [b for b in at.button if b.key and b.key.startswith("approuver_")]
 
@@ -393,8 +401,13 @@ def test_pilotage_chiffres_et_temps_gagne(env):
     assert metriques["Rejetées"] == "50 %"
     assert metriques["Hypothèse"] == "2.0 h"  # 4 fiches analysées × (45 − 15) min
     assert len(at.get("vega_lite_chart")) == 4
+    # Catégories de chaque graphique (ordre de l'axe) : libellés, jamais les codes.
+    axes = [json.loads(c.proto.spec)["layer"][0]["encoding"]["y"]["sort"] for c in at.get("vega_lite_chart")]
+    assert axes[1] == ["Composite", "Peinture", "Tôlerie"]
+    assert set(axes[2]) == {"Non conforme", "Conforme", "Indéterminé"}
     tout = textes(at)
     assert "Temps gagné estimé" in tout and "pas une mesure" in tout
+    assert "« Conforme » ou « Indéterminé »" in tout
 
     at.slider(key="minutes_sans").set_value(60).run()
     assert {m.label: m.value for m in at.metric}["Hypothèse"] == "3.0 h"
@@ -406,8 +419,11 @@ def test_tickets_table(env):
     at = app("views/tickets.py")
     [ligne] = at.dataframe[0].value.to_dict("records")
     assert (ligne["Ticket"], ligne["Fiche"], ligne["Verdict"], ligne["Statut"], ligne["Valideur"]) == (
-        "TCK-0001", "NC-2026-101", "NON_CONFORME", "OUVERT", VALIDEUR)
-    assert ligne["Règles"] == TOLERANCES.rules_hash[:12]
+        "TCK-0001", "NC-2026-101", "Non conforme", "OUVERT", VALIDEUR)
+    assert ligne["Règles"] == TOLERANCES.rules_hash[:8]
+    assert ligne["Date"].endswith(" UTC") and len(ligne["Date"]) == len("AAAA-MM-JJ HH:MM UTC")
+    colonnes = list(at.dataframe[0].value.columns)
+    assert colonnes == list(format.LARGEURS_TICKETS)  # chaque colonne a sa largeur
 
 
 def test_tickets_erp_injoignable(env):
@@ -444,6 +460,50 @@ def test_texte_brut_rendu_litteral(texte):
     visible = html.removeprefix("<p>").removesuffix("</p>\n").replace("<br />\n", "\n")
     visible = visible.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&amp;", "&")
     assert visible == texte
+
+
+@pytest.mark.parametrize("code, attendu", [
+    ("porosite", "Porosité"), ("epaisseur", "Épaisseur"), ("temperature_cuisson", "Température de cuisson"),
+    ("angle_pli", "Angle de pli"), ("longueur", "Longueur"), ("planeite", "Planéité"),
+    ("epaisseur_film", "Épaisseur de film"), ("adherence", "Adhérence"), ("brillance", "Brillance"),
+    ("rugosite", "Rugosité"),
+    ("taux_humidite_resine", "Taux humidite resine"),  # code inconnu : espaces, majuscule initiale
+    ("durete", "Durete"), ("", ""), (None, "-"),
+])
+def test_libelle_caracteristique(code, attendu):
+    assert format.libelle_caracteristique(code) == attendu
+
+
+@pytest.mark.parametrize("code, attendu", [
+    ("composite", "Composite"), ("tolerie", "Tôlerie"), ("peinture", "Peinture"), ("qualite", "Qualité"),
+    ("traitement_surface", "Traitement surface"), (None, "-"),
+])
+def test_libelle_procede(code, attendu):
+    assert format.libelle_procede(code) == attendu
+
+
+@pytest.mark.parametrize("code, attendu", [
+    ("NON_CONFORME", "Non conforme"), ("CONFORME", "Conforme"), ("INDETERMINE", "Indéterminé"),
+    ("A_REVOIR", "A REVOIR"), (None, "-"),
+])
+def test_libelle_verdict(code, attendu):
+    assert format.libelle_verdict(code) == attendu
+
+
+def test_libelles_couvrent_le_referentiel():
+    """Chaque caractéristique et chaque procédé de tolerances.yaml, et chaque verdict, a un libellé explicite."""
+    assert {s.caracteristique for s in TOLERANCES.specs} <= set(format.LIBELLES_CARACTERISTIQUE)
+    assert {s.procede for s in TOLERANCES.specs} <= set(format.LIBELLES_PROCEDE)
+    assert set(format.LIBELLES_VERDICT) == {v.value for v in Verdict}
+
+
+def test_largeurs_tickets_sans_defilement_a_1400px():
+    t = Ticket(id="TCK-0001", nc_id="NC-1", part_ref="CP-210", procede="composite", site="Site Alpha",
+               verdict="CONFORME", rules_hash="0" * 64, action_proposee="Action.", sources=[], valide_par=VALIDEUR,
+               created_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc))
+    assert list(format.LARGEURS_TICKETS) == list(format.ticket_rows([t])[0])
+    # 1400 px - barre latérale (~300 px) - marges du mode large (~160 px).
+    assert sum(format.LARGEURS_TICKETS.values()) <= 1400 - 300 - 160
 
 
 def test_texte_brut_sans_ponctuation_inchange():
@@ -493,8 +553,8 @@ def test_mesure_rows_unites_sur_min_max_et_ecart():
     m = {"caracteristique": "angle_pli", "valeur": "91.2", "unite": "deg", "min": "89.5", "max": "90.5",
          "ecart": "0.7", "statut": "NON_CONFORME"}
     assert format.mesure_rows([m]) == [{
-        "Caractéristique": "angle_pli", "Valeur": "91.2°", "Min": "89.5°", "Max": "90.5°", "Écart": "0.7°",
-        "Statut": "NON_CONFORME",
+        "Caractéristique": "Angle de pli", "Valeur": "91.2°", "Min": "89.5°", "Max": "90.5°", "Écart": "0.7°",
+        "Statut": "Non conforme",
     }]
 
 
@@ -509,7 +569,7 @@ def test_recap():
     assert format.recap_text([]) == "Aucune nouvelle fiche dans la boîte de réception."
     assert format.recap_rows(results)[0]["LLM"] == "4.2 s"
     assert format.recap_rows(results)[1] == {
-        "Fiche": "NC-2", "Verdict": "CONFORME", "Statut": "en erreur", "Origine": "-", "LLM": "-",
+        "Fiche": "NC-2", "Verdict": "Conforme", "Statut": "en erreur", "Origine": "-", "LLM": "-",
         "Détail": "ERP indisponible",
     }
 
@@ -519,8 +579,8 @@ def test_ticket_rows_hash_abrege():
                verdict="CONFORME", rules_hash="0123456789abcdef0123", action_proposee="Action.", sources=[],
                valide_par=VALIDEUR, created_at=datetime.datetime(2026, 10, 1, 8, 5, tzinfo=datetime.timezone.utc))
     assert format.ticket_rows([t]) == [{
-        "Ticket": "TCK-0007", "Fiche": "NC-1", "Verdict": "CONFORME", "Statut": "OUVERT", "Valideur": VALIDEUR,
-        "Date (UTC)": "2026-10-01 08:05", "Règles": "0123456789ab",
+        "Ticket": "TCK-0007", "Fiche": "NC-1", "Verdict": "Conforme", "Statut": "OUVERT", "Valideur": VALIDEUR,
+        "Date": "2026-10-01 08:05 UTC", "Règles": "01234567",
     }]
 
 

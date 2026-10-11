@@ -16,7 +16,6 @@ AMBRE = "#FFB000"
 ROUGE, VERT, AMBRE_STATUT = "#E5484D", "#30A46C", "#E2A336"
 COULEURS_VERDICT = {"NON_CONFORME": ROUGE, "CONFORME": VERT, "INDETERMINE": AMBRE_STATUT}
 BADGE_VERDICT = {"NON_CONFORME": "red", "CONFORME": "green", "INDETERMINE": "orange"}
-LIBELLE_VERDICT = {"NON_CONFORME": "NON CONFORME", "CONFORME": "CONFORME", "INDETERMINE": "INDÉTERMINÉ"}
 
 # Séries des graphiques (hors statuts) : paire validée daltonisme et contraste sur le fond graphite.
 SERIE = "#3987E5"

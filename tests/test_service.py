@@ -94,8 +94,8 @@ def test_verdict_oracle_conforme_a_inbox_expected(fiche):
     assert check_conformity(nc, TOLERANCES).verdict.value == fiche["verdict"]
 
 
-def test_nouvelles_fiches_sur_les_sites_fictifs():
-    sites = {parse_nc_file(INBOX / f"{f['nc_id']}.md").site for f in EXPECTED if f["nc_id"] > "NC-2026-103"}
+def test_fiches_sur_quatre_sites_fictifs():
+    sites = {parse_nc_file(f).site for f in INBOX.glob("*.md")}
     assert sites == {"Site Alpha", "Site Beta", "Site Gamma", "Site Delta"}
 
 
@@ -170,12 +170,12 @@ def test_erp_injoignable_pendant_le_traitement_statut_erreur(tmp_path):
         assert service.list_pending() == []
         run = service.journal.get_run("NC-2026-101")
         # Arrêt dès check_existing : la fiche est lue, l'oracle n'a pas tourné.
-        assert (run.site, run.part_ref, run.verdict) == ("Atelier Nord (fictif)", "CP-210", None)
+        assert (run.site, run.part_ref, run.verdict) == ("Site Beta", "CP-210", None)
 
 
 def test_doublon_statut_doublon(tmp_path, erp):
     existing = erp.client.create_ticket(TicketCreate(
-        nc_id="NC-2026-101", part_ref="CP-210", procede="composite", site="Atelier Nord (fictif)",
+        nc_id="NC-2026-101", part_ref="CP-210", procede="composite", site="Site Beta",
         verdict="NON_CONFORME", rules_hash=TOLERANCES.rules_hash, action_proposee="Action déjà engagée.",
         sources=[], valide_par=VALIDEUR,
     ))

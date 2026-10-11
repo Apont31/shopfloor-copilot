@@ -60,9 +60,9 @@ def test_run_inbox_recapitulatif(service, inbox, capsys):
     out = capsys.readouterr().out
     assert "3 fiche(s), 3 traitée(s), 0 déjà journalisée(s) ignorée(s)" in out
     assert ligne(out, "Fiche") == ["Fiche", "Verdict", "Statut", "Origine", "LLM", "Détail"]
-    assert ligne(out, "NC-2026-101")[:4] == ["NC-2026-101", "NON_CONFORME", "en_attente", "llm"]
-    assert ligne(out, "NC-2026-102") == ["NC-2026-102", "CONFORME", "en_attente", "deterministe", "-"]
-    assert ligne(out, "NC-2026-103") == ["NC-2026-103", "INDETERMINE", "en_attente", "deterministe", "-"]
+    assert ligne(out, "NC-2026-101")[:5] == ["NC-2026-101", "Non", "conforme", "en_attente", "llm"]
+    assert ligne(out, "NC-2026-102") == ["NC-2026-102", "Conforme", "en_attente", "deterministe", "-"]
+    assert ligne(out, "NC-2026-103") == ["NC-2026-103", "Indéterminé", "en_attente", "deterministe", "-"]
     assert "Récapitulatif : 3 en_attente" in out
     assert "Appels LLM : " in out and "Appels LLM : aucun" not in out
 
@@ -92,10 +92,10 @@ def test_pending_affiche_la_file(service, inbox, capsys):
     assert cli.print_pending(service) == 0
     out = capsys.readouterr().out
     assert "File de validation : 3 fiche(s) en attente" in out
-    assert "NC-2026-101  NON_CONFORME  - pièce CP-210 (composite), Atelier Nord (fictif)" in out
-    assert "Mesure      : porosite 2.8 % (min -, max 2.0) NON_CONFORME" in out
+    assert "NC-2026-101  Non conforme  - pièce CP-210 (Composite), Site Beta" in out
+    assert "Mesure      : Porosité 2.8 % (min -, max 2.0) Non conforme" in out
     assert "Proposition : origine llm, décision suggérée rebut" in out
-    assert "Mesure      : rugosite 3.2 µm (min -, max -) INDETERMINE" in out
+    assert "Mesure      : Rugosité 3.2 µm (min -, max -) Indéterminé" in out
     assert "ALERTE" not in out
 
 
