@@ -1,0 +1,32 @@
+# Cas d'évaluation de l'assistant procédures (étape 11). Données fictives.
+# Réussite : expected_doc_id cité dans les sources (sans refus), ou refus quand expected_refus est vrai.
+cases:
+  # Tolérances : réponse lue dans le référentiel, sans LLM.
+  - question: "Quelle est la porosité maximale du CP-210 ?"
+    kind: tolerance
+    expected_doc_id: PROC-COMP-01
+  - question: "Tolérance d'angle de pli du SE-450 ?"
+    kind: tolerance
+    expected_doc_id: PROC-TOL-01
+  - question: "Épaisseur de film mini et maxi sur le capot PP-120 ?"
+    kind: tolerance
+    expected_doc_id: PROC-PEI-01
+
+  # Procédures et historique de NC : RAG + LLM.
+  - question: "Que faut-il vérifier sur la bâche à vide avant de lancer une cuisson autoclave ?"
+    kind: procedure
+    expected_doc_id: PROC-COMP-01
+  - question: "Pourquoi l'angle de pli du SE-450 était-il hors tolérance sur le lot L25-0624-T ?"
+    kind: historique
+    expected_doc_id: NC-2025-031
+  - question: "Qui doit valider une dérogation sur une non-conformité ?"
+    kind: procedure
+    expected_doc_id: PROC-QUA-01
+
+  # Hors corpus : refus attendu.
+  - question: "Quel est le couple de serrage des vis du carter de la presse-plieuse ?"
+    kind: hors_corpus
+    expected_refus: true
+  - question: "Quelle est la procédure de soudage TIG des cadres inox ?"
+    kind: hors_corpus
+    expected_refus: true

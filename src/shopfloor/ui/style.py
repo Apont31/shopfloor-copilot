@@ -21,6 +21,7 @@ BADGE_VERDICT = {"NON_CONFORME": "red", "CONFORME": "green", "INDETERMINE": "ora
 SERIE = "#3987E5"
 COULEURS_ORIGINE = {"LLM": "#3987E5", "Déterministe": "#D55181"}
 BADGE_ORIGINE = {"llm": ("LLM", "blue"), "deterministe": ("Déterministe", "violet")}
+BADGE_ORIGINE_ASSISTANT = {"referentiel": "violet", "llm": "blue", "passages": "gray"}
 
 _CSS = f"""
 <style>

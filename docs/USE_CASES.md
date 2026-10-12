@@ -29,13 +29,13 @@ Chaque critère est noté de 1 à 5. **5 est toujours la note la plus favorable.
 - **Notes** : V 4, F 5, R 4, D 5, A 4. **Score 4,35.** Priorité **haute**.
 - **Décision** : **go** pour un pilote sur 1 site, avec mesure du temps réel par fiche.
 
-### 2. Assistant procédures (industrie / production) : en cours
+### 2. Assistant procédures (industrie / production) : statut MVP
 
 - **Problème** : les opérateurs cherchent longtemps la bonne consigne dans des procédures longues.
 - **Solution** : questions-réponses sur les procédures et gammes, réponses citant la section source, « je ne sais pas » si rien n'est trouvé.
 - **Données** : procédures et gammes à jour, déjà indexées pour le copilote NC.
 - **Notes** : V 4, F 4, R 4, D 4, A 4. **Score 4,00.** Priorité **haute**.
-- **Décision** : **go** POC. Réutilise l'index, l'interface et les tests du copilote NC.
+- **Décision** : **go**, MVP livré : tolérances lues dans le référentiel sans LLM, autres réponses rédigées par le LLM avec sources et vérifiées par un garde-fou, refus si rien n'est trouvé. Réutilise l'index, l'interface et les tests du copilote NC.
 
 ### 3. Synthèse des réclamations clients (commerce)
 
@@ -94,7 +94,7 @@ Chaque critère est noté de 1 à 5. **5 est toujours la note la plus favorable.
 | Rang | Cas d'usage | Domaine | V | F | R | D | A | Score | Priorité | Décision |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | Copilote NC | Production | 4 | 5 | 4 | 5 | 4 | 4,35 | Haute | Go pilote 1 site (MVP) |
-| 2 | Assistant procédures | Production | 4 | 4 | 4 | 4 | 4 | 4,00 | Haute | Go POC (en cours) |
+| 2 | Assistant procédures | Production | 4 | 4 | 4 | 4 | 4 | 4,00 | Haute | Go (MVP) |
 | 3 | Synthèse des réclamations clients | Commerce | 3 | 4 | 3 | 4 | 4 | 3,50 | Moyenne | Ajuster : cadrage données |
 | 4 | OCR des fiches NC papier | Production | 3 | 3 | 4 | 4 | 4 | 3,45 | Moyenne | Ajuster : compter les fiches papier |
 | 5 | Dérive d'épaisseur en peinture | Production | 4 | 3 | 4 | 2 | 3 | 3,40 | Moyenne | Ajuster : vérifier l'historique |
@@ -105,5 +105,5 @@ Chaque critère est noté de 1 à 5. **5 est toujours la note la plus favorable.
 ## Conclusion
 
 1. **Finir le pilote du copilote NC** sur un site et mesurer le temps réel par fiche : c'est la preuve qui manque pour décider d'une généralisation.
-2. **Lancer le POC de l'assistant procédures** : même index, même interface, mêmes garde-fous, donc un coût marginal faible ; l'assistant RH viendra ensuite sur la même base.
+2. **Tester l'assistant procédures (MVP) sur le site pilote** : même index, même interface, mêmes garde-fous, donc un coût marginal faible ; l'assistant RH viendra ensuite sur la même base.
 3. **Qualifier les données** des cas 3, 4 et 5 avant tout POC ; la présélection de candidatures reste hors du portefeuille.

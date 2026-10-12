@@ -55,6 +55,14 @@ Pilotage : volumes, part des propositions approuvées, modifiées ou rejetées, 
 
 Tickets ERP : chaque ticket avec son verdict, son valideur et l'empreinte des tolérances appliquées.
 
+### Assistant procédures
+
+Questions en langage courant sur les procédures, gammes et anciennes NC, dans l'interface ou en ligne de commande (`python -m shopfloor.cli ask "question"`).
+Une question de tolérance est résolue par le référentiel (`config/tolerances.yaml`), sans LLM. Les autres questions sont traitées par le LLM, qui ne s'appuie que sur les passages retrouvés et cite toujours ses sources.
+Un garde-fou rejette toute source ou tout chiffre absent des passages. La réponse est alors remplacée par les extraits pertinents ; si rien n'est trouvé, l'assistant le dit.
+
+![Assistant procédures : réponse du référentiel et réponse du LLM avec sources](docs/img/assistant.png)
+
 Lancement (deux terminaux) :
 
 ```bash
@@ -122,6 +130,7 @@ python -m shopfloor.cli pending                       # liste les fiches en atte
 python -m shopfloor.cli decide NC-2026-101 approve --valide-par "Nom"
 python -m shopfloor.cli decide NC-2026-103 edit --action "..." --valide-par "Nom"
 python -m shopfloor.cli retry <nc_id>                 # remet une fiche en erreur dans le prochain run-inbox
+python -m shopfloor.cli ask "porosité max du CP-210"  # assistant procédures
 ```
 
 Repartir de bases vides (ERP, journal, file de validation), après avoir fermé l'interface et le serveur ERP. L'index RAG et `data/` ne sont jamais touchés :
@@ -153,14 +162,15 @@ Les images sont publiées automatiquement sur GHCR à chaque version (CD).
 
 ## Qualité
 
-- 644 tests : 630 sans LLM (`pytest -m "not llm"`) et 14 avec le vrai Ollama (`pytest -m llm`).
+- 726 tests : 711 sans LLM (`pytest -m "not llm"`) et 15 avec le vrai Ollama (`pytest -m llm`).
 - Bornes de l'oracle testées aux valeurs limites. Mutations manuelles des comparaisons (`>` en `>=`, `<` en `<=`, borne supprimée) : toutes détectées.
 - Évaluation du retrieval : hit@3 = 5/5.
+- Évaluation de l'assistant procédures : 8/8 (3 tolérances, 3 questions de procédure ou d'historique, 2 refus hors corpus).
 - CI GitHub Actions sur Ubuntu et Windows, Python 3.12 : tests sans LLM et construction de l'image Docker à chaque push sur main et à chaque pull request.
 
 ## Ce que ce projet démontre
 
-- **Outils IA** : copilote métier, automatisation d'une boîte de réception, RAG sur des documents internes, agent avec validation humaine.
+- **Outils IA** : copilote métier, automatisation d'une boîte de réception, RAG sur des documents internes, assistant questions-réponses avec sources, agent avec validation humaine.
 - **Lab IA et test & learn** : étapes courtes et taguées, mesure d'adoption dans le Pilotage, cadre de lab ([docs/LAB_IA.md](docs/LAB_IA.md)), backlog priorisé par une grille ROI ([docs/USE_CASES.md](docs/USE_CASES.md)).
 - **Intégration** : API de type ERP, donnée structurée pour l'IA (tolérances en YAML, fiches à en-tête structuré), traçabilité des règles appliquées.
 - **Déploiement terrain** : interface pour le responsable qualité, voyants d'état, guide et plan de formation ([docs/GUIDE_OPERATEUR.md](docs/GUIDE_OPERATEUR.md)).
@@ -173,7 +183,6 @@ Les images sont publiées automatiquement sur GHCR à chaque version (CD).
 
 ## Roadmap
 
-- Assistant questions-réponses sur les procédures.
 - API d'entrée des fiches.
 - OCR des fiches scannées.
 - Postgres.
@@ -202,8 +211,9 @@ src/shopfloor/
   erp/                   fausse API ERP (FastAPI + SQLite) et client
   ui/                    interface Streamlit
   service.py             boîte de réception et file de validation
+  assistant.py           assistant procédures : référentiel, RAG + LLM, garde-fou
   journal.py, kpis.py    journal des traitements et indicateurs du Pilotage
-  cli.py                 commandes ingest, search, process, run-inbox, pending, decide, retry, reset
+  cli.py                 commandes ingest, search, process, run-inbox, pending, decide, retry, reset, ask
 tests/                   pytest, faux LLM déterministe
 ```
 

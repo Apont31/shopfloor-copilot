@@ -29,6 +29,7 @@ LIBELLES_STATUT = {
     "erreur": "en erreur", "doublon": "doublon",
 }
 LIBELLES_ORIGINE = {"llm": "LLM", "deterministe": "Déterministe", "aucune": "-"}
+LIBELLES_ORIGINE_ASSISTANT = {"referentiel": "Référentiel", "llm": "LLM", "passages": "Extraits"}
 LIBELLES_DECISION = {"rebut": "Rebut", "retouche": "Retouche", "derogation": "Dérogation", "escalade": "Escalade"}
 HASH_COURT = 8
 GRAVITE = ("NON_CONFORME", "INDETERMINE", "CONFORME")  # ordre de la file de validation

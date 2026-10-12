@@ -8,6 +8,7 @@ python -m shopfloor.cli pending
 python -m shopfloor.cli decide <nc_id> approve|reject|edit [--action "..."] --valide-par NOM [--commentaire "..."]
 python -m shopfloor.cli retry <nc_id>
 python -m shopfloor.cli reset [--yes]
+python -m shopfloor.cli ask "question"
 """
 
 import argparse
@@ -19,6 +20,7 @@ from pathlib import Path
 from chromadb.errors import NotFoundError
 
 from shopfloor.agent.graph import Deps, build_graph, get_state, resume, start
+from shopfloor.assistant import AssistantDeps, AssistantError, answer
 from shopfloor.agent.state import AgentState, HumanDecision
 from shopfloor.config import Settings
 from shopfloor.erp.client import ErpClient, ErpError
@@ -30,7 +32,13 @@ from shopfloor.rag.embeddings import OllamaEmbedder
 from shopfloor.rag.ingest import ingest
 from shopfloor.rag.retriever import make_retriever, retrieve_similar
 from shopfloor.service import Service, ServiceError, inbox_files
-from shopfloor.ui.format import fmt_mesure, libelle_caracteristique, libelle_procede, libelle_verdict
+from shopfloor.ui.format import (
+    LIBELLES_ORIGINE_ASSISTANT,
+    fmt_mesure,
+    libelle_caracteristique,
+    libelle_procede,
+    libelle_verdict,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 TOLERANCES_PATH = ROOT / "config" / "tolerances.yaml"
@@ -298,6 +306,39 @@ def run_reset(settings: Settings, yes: bool = False, input_fn=None) -> int:
     return code
 
 
+# --- ask : logique testable -----------------------------------------------------------------------
+
+
+def run_ask(question: str, deps: AssistantDeps) -> int:
+    """Assistant procédures : réponse, origine et sources. Code 1 si Ollama ou l'index RAG manque."""
+    chrono = ChronoLLM(deps.llm) if deps.llm is not None else None
+    try:
+        rep = answer(question, replace(deps, llm=chrono) if chrono is not None else deps)
+    except (AssistantError, ValueError) as e:
+        print(f"ERREUR : {e}")
+        return 1
+    print(f"Origine : {LIBELLES_ORIGINE_ASSISTANT[rep.origine]}" + (" (refus)" if rep.refus else ""))
+    print("\nRéponse :")
+    for ligne in rep.texte.splitlines():
+        print(f"  {ligne}")
+    if rep.origine == "passages" and rep.passages:
+        print("\nExtraits :")
+        for c in rep.passages:
+            print(f"  {c.doc_id} ({c.section}) score={c.score:.3f}")
+            for ligne in c.text.splitlines():
+                print(f"    {ligne}")
+    print(f"\nSources : {', '.join(f'{s.doc_id} ({s.section})' for s in rep.sources) or 'aucune'}")
+    if rep.motifs:
+        print("Réponse du LLM écartée :")
+        for m in rep.motifs:
+            print(f"  - {m}")
+    if chrono is None or not chrono.durations:
+        print("Appel LLM : aucun")
+    else:
+        print(f"Appel LLM : {sum(chrono.durations):.1f} s ({len(chrono.durations)} appel(s))")
+    return 0
+
+
 # --- CLI : couche fine ----------------------------------------------------------------------------
 
 
@@ -331,6 +372,8 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
     p_retry.add_argument("nc_id")
     p_reset = sub.add_parser("reset", help="supprime les bases ERP, journal et état (jamais l'index RAG ni data/)")
     p_reset.add_argument("--yes", action="store_true", help="sans demande de confirmation")
+    p_ask = sub.add_parser("ask", help="assistant procédures : question sur les documents, réponse avec sources")
+    p_ask.add_argument("question")
     args = parser.parse_args(argv)
     if args.command == "process" and args.decision and not args.valide_par:
         parser.error("--decision exige --valide-par")
@@ -349,6 +392,14 @@ def main(argv: list[str] | None = None, embedder=None) -> int:
             return 1
         print(f"{n} chunks indexés dans la collection shopfloor_docs")
         return 0
+
+    if args.command == "ask":
+        deps = AssistantDeps(
+            tolerances=load_tolerances(TOLERANCES_PATH),
+            retriever=make_retriever(settings.chroma_dir, embedder),
+            llm=OllamaLLM(settings),
+        )
+        return run_ask(args.question, deps)
 
     if args.command == "process":
         if args.decision:

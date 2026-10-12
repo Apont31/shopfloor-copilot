@@ -17,6 +17,7 @@ pages = [
     st.Page("views/inbox.py", title="Boîte de réception", icon=":material/inbox:", default=True),
     st.Page("views/pilotage.py", title="Pilotage", icon=":material/monitoring:"),
     st.Page("views/tickets.py", title="Tickets ERP", icon=":material/confirmation_number:"),
+    st.Page("views/assistant.py", title="Assistant procédures", icon=":material/menu_book:"),
 ]
 page = st.navigation(pages)
 

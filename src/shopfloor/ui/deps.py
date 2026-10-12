@@ -13,6 +13,7 @@ import streamlit as st
 
 from shopfloor import health
 from shopfloor.agent.graph import Deps
+from shopfloor.assistant import AssistantDeps
 from shopfloor.cli import INBOX_DIR, TOLERANCES_PATH
 from shopfloor.config import Settings
 from shopfloor.erp.client import ErpClient
@@ -29,8 +30,8 @@ T = TypeVar("T")
 
 
 def override(**deps) -> None:
-    """Remplace service, erp, settings ou inbox_dir (tests)."""
-    inconnues = set(deps) - {"service", "erp", "settings", "inbox_dir"}
+    """Remplace service, erp, settings, inbox_dir ou assistant (tests)."""
+    inconnues = set(deps) - {"service", "erp", "settings", "inbox_dir", "assistant"}
     if inconnues:
         raise ValueError(f"dépendance(s) inconnue(s) : {', '.join(sorted(inconnues))}")
     _overrides.update(deps)
@@ -71,6 +72,20 @@ def _service() -> Service:
 
 def get_service() -> Service:
     return _overrides.get("service") or _service()
+
+
+@st.cache_resource(show_spinner=False)
+def _assistant() -> AssistantDeps:
+    settings = Settings()
+    return AssistantDeps(
+        tolerances=load_tolerances(TOLERANCES_PATH),
+        retriever=make_retriever(settings.chroma_dir, OllamaEmbedder(settings)),
+        llm=OllamaLLM(settings),
+    )
+
+
+def get_assistant() -> AssistantDeps:
+    return _overrides.get("assistant") or _assistant()
 
 
 def get_voyants(force: bool = False) -> list[health.Voyant]:

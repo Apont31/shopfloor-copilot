@@ -27,6 +27,13 @@
 - **Rejeter** quand la proposition est hors sujet ou que la fiche elle-même est fausse (mesure mal saisie, mauvaise pièce). Aucun ticket n'est créé. Écrivez toujours la raison dans « Commentaire » : c'est ce qui permet d'améliorer l'outil.
 - **Indéterminé** : une caractéristique n'a pas de tolérance. La proposition est l'escalade prévue par PROC-QUA-01 ; approuvez-la ou précisez-la.
 
+## Assistant procédures
+
+- Posez votre question dans la page **Assistant procédures**, par exemple « porosité max du CP-210 » ou « que faire au changement de lot matière ? ». Chaque réponse affiche son origine et ses sources.
+- **Référentiel** : tolérance lue dans le référentiel, elle fait foi. **LLM** : réponse rédigée à partir des documents cités ; vérifiez-la dans « Passages ». **Extraits** : le modèle n'a pas donné de réponse fiable, lisez les extraits proposés.
+- « Je ne trouve pas cette information dans les documents » : la réponse n'est pas dans le corpus. Ne cherchez pas à la faire inventer, signalez le manque au référent.
+- Après un nouvel `ingest`, l'interface doit être redémarrée pour voir le nouvel index. Mieux : lancer `ingest` **avant** l'interface.
+
 ## Voyant rouge : quoi faire
 
 | Voyant | Message | Action |
