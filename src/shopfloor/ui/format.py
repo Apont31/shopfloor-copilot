@@ -65,6 +65,20 @@ def fmt_mesure(v, unite: str) -> str:
     symbole = UNITES_AFFICHEES.get(unite, unite)
     return f"{v}{symbole}" if symbole == "°" else f"{v} {symbole}"
 
+
+def decimal_fr(v) -> str:
+    """Nombre écrit à la française, chiffres inchangés : 2.0 -> « 2,0 », 89.5 -> « 89,5 », 120 -> « 120 »."""
+    return str(v).replace(".", ",")
+
+
+# Marques de mise en forme markdown des documents : gras ou souligné (** et __), titres (# en début de ligne).
+_MARQUES = re.compile(r"\*\*|__|^[ \t]*#{1,6}[ \t]*", re.MULTILINE)
+
+
+def sans_marques(texte: str) -> str:
+    """Retire les marques ** , __ et # de titre d'un passage, avant texte_brut : pas d'astérisques visibles."""
+    return _MARQUES.sub("", texte)
+
 # Ponctuation qui peut former du markdown (liens, images, HTML, titres, listes, code, LaTeX, liens automatiques
 # GFM sur « http:// », « www. » ou une adresse e-mail, directives Streamlit « :red[...] »).
 _MARKDOWN = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~$:=@&])")

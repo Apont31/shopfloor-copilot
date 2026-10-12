@@ -27,7 +27,7 @@ from shopfloor.llm.assistant_prompts import build_assistant_prompt, build_assist
 from shopfloor.llm.client import LLMClient, LLMError
 from shopfloor.models import ToleranceSpec, ToleranceTable
 from shopfloor.rag.retriever import RetrievedChunk
-from shopfloor.ui.format import fmt_mesure, libelle_caracteristique
+from shopfloor.ui.format import decimal_fr, fmt_mesure, libelle_caracteristique
 
 RETRIEVE_K = 8
 EXTRAITS_K = 3  # passages affichés quand la réponse du LLM n'est pas fiable
@@ -180,13 +180,14 @@ def vise_une_tolerance(question: str) -> bool:
 
 
 def _valeur(v: Decimal, unite: str) -> str:
-    return f"classe {v}" if unite == "classe" else fmt_mesure(v, unite)
+    return f"classe {decimal_fr(v)}" if unite == "classe" else fmt_mesure(decimal_fr(v), unite)
 
 
 def bornes_lisibles(spec: ToleranceSpec) -> str:
-    """« de 3.05 à 3.35 mm, nominal 3.20 mm », « au plus 2.0 % », « au moins 60 µm » : bornes incluses."""
+    """« de 3,05 à 3,35 mm, nominal 3,20 mm », « au plus 2,0 % », « au moins 60 µm » : bornes incluses,
+    virgule décimale."""
     if spec.min is not None and spec.max is not None:
-        min_txt = str(spec.min) if spec.unite != "classe" else _valeur(spec.min, spec.unite)
+        min_txt = decimal_fr(spec.min) if spec.unite != "classe" else _valeur(spec.min, spec.unite)
         texte = f"de {min_txt} à {_valeur(spec.max, spec.unite)}"
     elif spec.max is not None:
         texte = f"au plus {_valeur(spec.max, spec.unite)}"

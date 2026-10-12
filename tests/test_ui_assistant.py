@@ -110,10 +110,20 @@ def test_exemple_cliquable_tolerance_sans_llm(installer):
     assert not at.exception, at.exception
     tout = textes(at)
     assert ":violet-badge[Origine : Référentiel]" in tout
-    assert brut("Porosité de la pièce CP-210 : au plus 2.0 % (bornes incluses).") in tout
+    assert brut("Porosité de la pièce CP-210 : au plus 2,0 % (bornes incluses).") in tout
     assert f"- {brut('PROC-COMP-01')} · {brut('Tolérances')}" in tout
     assert "Lu dans le référentiel de tolérances, sans LLM." in tout
     assert llm.n_calls == 0
+
+
+def test_passages_sans_marques_markdown(installer):
+    chunk = CHUNKS[2].model_copy(update={"text": "# Mise sous vide\n- **Test d'étanchéité obligatoire** avant cuisson."})
+    installer(llm=FakeLLM(reponse_json(sources=[{"doc_id": "PROC-COMP-01", "section": "Mise sous vide"}])),
+              retriever=FakeRetriever(chunks=(chunk,)))
+    at = poser(page(), QUESTION)
+    passage = brut("Mise sous vide\n- Test d'étanchéité obligatoire avant cuisson.")
+    assert passage in textes(at)
+    assert "**" not in passage and "\\*" not in passage
 
 
 def test_extraits_si_garde_fou(installer):

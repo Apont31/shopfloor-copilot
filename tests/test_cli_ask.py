@@ -25,7 +25,7 @@ def test_ask_tolerance(capsys):
     assert cli.run_ask("Porosité max du CP-210 ?", deps(llm=FakeLLM())) == 0
     out = capsys.readouterr().out
     assert "Origine : Référentiel" in out
-    assert "  Porosité de la pièce CP-210 : au plus 2.0 % (bornes incluses)." in out
+    assert "  Porosité de la pièce CP-210 : au plus 2,0 % (bornes incluses)." in out
     assert "Sources : PROC-COMP-01 (Tolérances)" in out
     assert "Appel LLM : aucun" in out
 
@@ -75,7 +75,7 @@ def test_main_ask_tolerance_sans_llm(chroma_env, capsys, monkeypatch):
     monkeypatch.setattr(cli, "OllamaLLM", lambda settings: FakeLLM())  # un appel ferait échouer le test
     assert cli.main(["ask", "tolérance d'angle de pli SE-450"], embedder=FakeEmbedder()) == 0
     out = capsys.readouterr().out
-    assert "Angle de pli de la pièce SE-450 : de 89.5 à 90.5°, nominal 90.0° (bornes incluses)." in out
+    assert "Angle de pli de la pièce SE-450 : de 89,5 à 90,5°, nominal 90,0° (bornes incluses)." in out
 
 
 def test_main_ask_rag(chroma_env, capsys, monkeypatch):

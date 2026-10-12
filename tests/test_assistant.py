@@ -63,18 +63,18 @@ def deps(llm=None, retriever=None) -> AssistantDeps:
 # référence de pièce sans tiret.
 SPECS = [
     ("Quelle est l'epaisseur mini du cp210 ?",
-     "Épaisseur de la pièce CP-210 : de 3.05 à 3.35 mm, nominal 3.2 mm (bornes incluses).", "PROC-COMP-01"),
+     "Épaisseur de la pièce CP-210 : de 3,05 à 3,35 mm, nominal 3,2 mm (bornes incluses).", "PROC-COMP-01"),
     ("Porosité max du CP-210 ?",
-     "Porosité de la pièce CP-210 : au plus 2.0 % (bornes incluses).", "PROC-COMP-01"),
+     "Porosité de la pièce CP-210 : au plus 2,0 % (bornes incluses).", "PROC-COMP-01"),
     ("Température de cuisson maximale pour le CP-210",
      "Température de cuisson de la pièce CP-210 : de 175 à 185 °C, nominal 180 °C (bornes incluses).",
      "PROC-COMP-01"),
     ("Tolérance d'angle de pli SE-450",
-     "Angle de pli de la pièce SE-450 : de 89.5 à 90.5°, nominal 90.0° (bornes incluses).", "PROC-TOL-01"),
+     "Angle de pli de la pièce SE-450 : de 89,5 à 90,5°, nominal 90,0° (bornes incluses).", "PROC-TOL-01"),
     ("Longueur admissible du SE 450 ?",
-     "Longueur de la pièce SE-450 : de 249.7 à 250.3 mm, nominal 250.0 mm (bornes incluses).", "PROC-TOL-01"),
+     "Longueur de la pièce SE-450 : de 249,7 à 250,3 mm, nominal 250,0 mm (bornes incluses).", "PROC-TOL-01"),
     ("PLANÉITÉ MAXIMALE SE-450",
-     "Planéité de la pièce SE-450 : au plus 0.5 mm (bornes incluses).", "PROC-TOL-01"),
+     "Planéité de la pièce SE-450 : au plus 0,5 mm (bornes incluses).", "PROC-TOL-01"),
     ("Épaisseur de film tolérée sur le capot PP-120 ?",
      "Épaisseur de film de la pièce PP-120 : de 60 à 120 µm (bornes incluses).", "PROC-PEI-01"),
     ("Adhérence maxi PP-120 (quadrillage) ?",
@@ -103,7 +103,7 @@ def test_tolerance_bornes_lues_dans_le_referentiel():
         assert spec.source == source
         for borne in (spec.min, spec.max, spec.nominal):
             if borne is not None:
-                assert str(borne) in texte
+                assert str(borne).replace(".", ",") in texte
 
 
 @pytest.mark.parametrize("question, attendu", [

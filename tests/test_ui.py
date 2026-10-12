@@ -7,6 +7,7 @@ la sonde Ollama est remplacée, sauf dans le test des voyants rouges (port ferm�
 import datetime
 import json
 import shutil
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -899,6 +900,36 @@ def test_largeurs_tickets_sans_defilement_a_1400px():
 
 def test_texte_brut_sans_ponctuation_inchange():
     assert format.texte_brut("Contrôle visuel refait sur trois capots") == "Contrôle visuel refait sur trois capots"
+
+
+@pytest.mark.parametrize("valeur, attendu", [
+    (Decimal("2.0"), "2,0"), (Decimal("89.5"), "89,5"), (Decimal("120"), "120"), (Decimal("3.20"), "3,20"),
+    (Decimal("-0.15"), "-0,15"), (2.0, "2,0"), (120, "120"),
+])
+def test_decimal_fr(valeur, attendu):
+    assert format.decimal_fr(valeur) == attendu
+
+
+@pytest.mark.parametrize("texte, attendu", [
+    ("- **Test d'étanchéité obligatoire avant cuisson** : tirer au vide.",
+     "- Test d'étanchéité obligatoire avant cuisson : tirer au vide."),
+    ("__Point d'arrêt__ avant cuisson", "Point d'arrêt avant cuisson"),
+    ("# Titre\n## Sous-titre\n  ### Section\nTexte", "Titre\nSous-titre\nSection\nTexte"),
+    ("Repère #3 et 2 * 3", "Repère #3 et 2 * 3"),  # # hors titre et astérisque seule : inchangés
+    ("Sans marque.", "Sans marque."),
+])
+def test_sans_marques(texte, attendu):
+    assert format.sans_marques(texte) == attendu
+
+
+def test_passage_sans_marques_reste_brut():
+    """Marques retirées puis texte_brut : ni astérisque visible, ni mise en forme interprétée."""
+    from markdown_it import MarkdownIt
+
+    texte = "# Mise sous vide\n- **Test d'étanchéité** obligatoire [lien](http://x.invalid)"
+    html = MarkdownIt("commonmark").render(format.texte_brut(format.sans_marques(texte)))
+    assert "*" not in html and "<strong>" not in html and "<h1>" not in html and "<a " not in html
+    assert "Test d'étanchéité obligatoire" in html.replace("&#x27;", "'")
 
 
 def _item(nc_id, verdict, site="Site Alpha"):

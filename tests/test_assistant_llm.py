@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from shopfloor.assistant import Answer, AssistantDeps, answer
+from shopfloor.assistant import Answer, AssistantDeps, answer, normaliser
 from shopfloor.llm.chrono import ChronoLLM
 from shopfloor.llm.ollama_client import OllamaLLM
 from shopfloor.oracle.loader import load_tolerances
@@ -67,3 +67,17 @@ def test_evaluation_assistant(deps):
     print(f"\nTaux de réussite : {n_ok}/{len(resultats)}"
           f" ; durée moyenne hors référentiel : {sum(durees) / max(len(durees), 1):.1f} s")
     assert n_ok / len(resultats) >= TAUX_MIN
+
+
+# Points attendus pour la question autoclave (PROC-COMP-01 et GAMME-CP210), en texte normalisé.
+POINTS_AUTOCLAVE = {"test d'étanchéité": "etancheite", "case « bâche validée » (op. 50)": "bache validee",
+                    "thermocouple (op. 60)": "thermocouple"}
+
+
+def test_autoclave_liste_plusieurs_points(deps):
+    rep = answer("Que faut-il vérifier avant de lancer une cuisson autoclave ?", deps)
+    print(f"\n  R : {rep.texte}\n  Sources : {', '.join(f'{s.doc_id} ({s.section})' for s in rep.sources)}")
+    assert rep.origine == "llm" and not rep.refus, rep.motifs
+    texte = normaliser(rep.texte)
+    cites = [nom for nom, motif in POINTS_AUTOCLAVE.items() if motif in texte]
+    assert len(cites) >= 2, f"points cités : {cites}"

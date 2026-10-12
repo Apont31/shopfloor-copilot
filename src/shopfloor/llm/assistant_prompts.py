@@ -21,10 +21,21 @@ dans les passages. Ne fais aucun calcul.
 4. Ne te prononce jamais sur la conformité d'une pièce. N'emploie pas les mots conforme, conformes, \
 conformité, ni les expressions « dans la tolérance » et « en tolérance ».
 5. Si les passages ne contiennent pas la réponse : trouve = false, texte vide, sources vide. Ne devine pas.
-6. Sinon : trouve = true ; texte = réponse courte et concrète (au plus 3 phrases, ou une liste d'au plus \
-3 points) ; sources = les passages réellement utilisés, chacun avec son doc_id et sa section recopiés \
-EXACTEMENT depuis les attributs du passage.
-7. Réponds uniquement par un objet JSON qui respecte le schéma fourni, sans texte autour."""
+6. Sinon : trouve = true ; sources = les passages réellement utilisés, chacun avec son doc_id et sa \
+section recopiés EXACTEMENT depuis les attributs du passage ; texte = réponse concrète.
+7. Forme du texte. Avant de répondre, parcours TOUS les passages, pas seulement le premier : les points \
+pertinents (vérifications, étapes, précautions) sont souvent répartis entre plusieurs documents.
+   - Un seul point pertinent : une ou deux phrases courtes.
+   - Plusieurs points pertinents : une liste de puces, une par ligne, au format \
+« - <point en une phrase courte> (<doc_id>) » ; ajoute « op. <numéro> » après le doc_id quand le passage \
+donne le numéro d'opération. Liste-les TOUS, une puce par action distincte, au plus 6 puces. Ne les \
+résume jamais en une seule phrase et ne recopie pas de longs détails.
+   - Cite dans sources chaque passage d'où vient une puce.
+   Exemple de forme seulement (contenu fictif, à ne jamais recopier) : passages DOC-A « Préparation » et \
+DOC-B « Vigilance » ; texte = "- Nettoyer le moule (DOC-A)\\n- Contrôler la date du produit (DOC-A)\\n- \
+Faire signer la case de la fiche par le chef d'équipe (DOC-B, op. <numéro>)\\n- Vérifier la position de la \
+sonde (DOC-B, op. <numéro>)" ; sources = DOC-A « Préparation » et DOC-B « Vigilance ».
+8. Réponds uniquement par un objet JSON qui respecte le schéma fourni, sans texte autour."""
 
 REPONSE_JSON_SCHEMA = {
     "type": "object",
@@ -71,6 +82,9 @@ def build_assistant_prompt(question: str, passages: list[RetrievedChunk]) -> tup
         "",
         "## Tâche",
         "Réponds à la question à partir des passages uniquement, sans aucun nombre absent des passages. "
+        "Relis les passages un par un, du premier au dernier, et relève chaque point qui répond à la question, "
+        "quel que soit le document. S'il y en a plusieurs, écris-les tous en puces (6 au plus), "
+        "chacun avec sa source ; une réponse qui n'en garde qu'un seul est incomplète. "
         "Si les passages ne contiennent pas la réponse, renvoie trouve = false.",
     ]
     return SYSTEM_PROMPT, "\n".join(lines)

@@ -47,7 +47,7 @@ def _reponse(rep: Answer) -> None:
         with st.expander(f"Passages ({len(rep.passages)})"):
             for c in rep.passages:
                 st.markdown(f"**{brut(c.doc_id)}** · {brut(c.section)} · score {c.score:.2f}")
-                st.markdown(brut(c.text))
+                st.markdown(brut(format.sans_marques(c.text)))
 
 
 st.title("Assistant procédures")
